@@ -1,5 +1,6 @@
 import tkinter as tk
 import random
+import os
 import threading
 from queue import Queue
 import time
@@ -7,28 +8,8 @@ import time
 import serial
 import json
 
-def connect_to_serial_port(port, baudrate=115200):
-    try:
-        ser = serial.Serial(port, baudrate)
-        return ser
-    except serial.SerialException as e:
-        print(f"Error: {e}")
-        return None
-
-def send_message(ser, message):
-    ser.write(message.encode())
-    ser.write("\n".encode())
-
-def receive_message(ser):
-    return ser.readline().decode().strip()
-
-def parse_message(str_msg):
-    try:
-        result = json.loads(str_msg)
-    except ValueError:
-        result = None
-        print("not json message", str_msg)
-    return result
+from communication import connect_to_serial_port, send_message, receive_message, parse_message
+from devices import Sensor, Valve
 
 serial_port = "COM6"  # Укажите ваш COM-порт
 baud_rate = 115200
@@ -44,33 +25,72 @@ class LabPneumoStand(tk.Tk):
         self.canvas = tk.Canvas(self, width=755, height=252)
         self.canvas.pack()
 
-        self.canvas.create_line(50, 126, 705, 126, width=2)
 
-        self.valve = self.canvas.create_polygon(50, 116, 65, 126, 50, 136, fill='green', outline='black')
-        self.valve_status = tk.BooleanVar(value=True)
-        self.valve_text = self.canvas.create_text(50, 150, text="ON", fill='green')
+        # self.valve = self.canvas.create_polygon(50, 116, 65, 126, 50, 136, fill='green', outline='black')
+        # self.valve_status = tk.BooleanVar(value=True)
+        # self.valve_text = self.canvas.create_text(50, 150, text="ON", fill='green')
 
-        self.sensors = {
-            'velocity': {'id': 'V', 'rectangle': None, 'text': None, 'value': 0},
-            'temperature': {'id': 'T', 'rectangle': None, 'text': None, 'value': 0},
-            'pressure': {'id': 'P', 'rectangle': None, 'text': None, 'value': 0}
-        }
+        # Загрузка конфигурации датчиков из файла
+        config = self.load_config(os.path.dirname(os.path.abspath(__file__))+'/config.json')
 
-        for sensor_id, sensor in self.sensors.items():
-            sensor_x = 250 + (100 * list(self.sensors.keys()).index(sensor_id))  # Adjust x-coordinate based on sensor position
-            sensor['rectangle'] = self.canvas.create_rectangle(sensor_x, 76, sensor_x + 40, 116, outline='black')
-            sensor['text'] = self.canvas.create_text(sensor_x + 20, 96, text=f"{sensor['value']}", fill='black')
+        sensors_raw = [Sensor.from_json(sensor_data) for sensor_data in config['sensors']]
+        self.sensors = {s.id: s for s in sensors_raw}
+
+        valves_raw = [Valve.from_json(valve_data) for valve_data in config['valves']]
+        self.valves = {v.id: v for v in valves_raw}
+
+        self.draw_elements(config)
+
+
+
+
+        # Создание списка объектов Sensor на основе конфигурации
+        
+
+        # Вывод информации о датчиках
+        for sensor in self.sensors:
+            print(sensor)
 
         self.initialize_sensors()
 
-        self.toggle_valve_button = tk.Button(self, text="Toggle Valve", command=self.toggle_valve)
-        self.toggle_valve_button.place(x=35, y=170)
+        # self.toggle_valve_button = tk.Button(self, text="Toggle Valve", command=self.toggle_valve)
+        # self.toggle_valve_button.place(x=35, y=170)
 
         self.sensor_data_queue = Queue()
         self.sensor_thread = threading.Thread(target=self.fetch_sensor_data, daemon=True)
         self.sensor_thread.start()
 
         self.update_sensor_values_from_queue()
+
+    # Пример использования класса Sensor
+    # Загрузка конфигурации из JSON-файла
+    def load_config(self, file_path):
+        with open(file_path, 'r') as file:
+            config = json.load(file)
+        return config
+
+    def draw_sensor(self, sensor):
+        sensor.rectangle = self.canvas.create_rectangle(sensor.coord_x, sensor.coord_y - 20, sensor.coord_x + 40, sensor.coord_y + 20, outline='black')
+        sensor.text = self.canvas.create_text(sensor.coord_x + 20, sensor.coord_y, text=f"{sensor.value}", fill='black')
+
+    def draw_valve(self, valve):
+        # Отрисовка треугольного клапана на холсте
+        # Координаты вершин треугольника
+        vertices = [(valve.coord_x-7, valve.coord_y - 10), (valve.coord_x + 7, valve.coord_y), (valve.coord_x - 7, valve.coord_y + 10)]
+        valve.shape = self.canvas.create_polygon(vertices, fill='green', outline='black')
+        valve.label = self.canvas.create_text(valve.coord_x-7, valve.coord_y+25, text="ON", fill='green')
+        valve.button = tk.Button(self, text="Toggle Valve", command=lambda: self.toggle_valve(valve))
+        valve.button.place(x=valve.coord_x - 15, y=valve.coord_y+44)
+
+    def draw_elements(self, config):
+        for line in config['lines']:
+            self.canvas.create_line(line['start_x'], line['start_y'], line['end_x'], line['end_y'], width=line['width'])
+
+        for sensor in self.sensors.values():
+            self.draw_sensor(sensor)
+
+        for valve in self.valves.values():
+            self.draw_valve(valve)
 
     def fetch_sensor_test_data(self):
         while True:
@@ -85,20 +105,13 @@ class LabPneumoStand(tk.Tk):
     def fetch_sensor_data(self):
         if serial_connection:
             while True:
-                value = None
                 received_message = receive_message(serial_connection)
                 parsed_message = parse_message(received_message)
                 if parsed_message:
                     if parsed_message.get('sensor_id'):
-                        sensor_data = {}
                         print(f"Received data: {received_message}")
-                        if parsed_message.get('sensor_id') == 1:
-                            sensor_data = {
-                                'velocity': parsed_message.get('value')
-                            }
-                        elif parsed_message.get('sensor_id') == 17:
-                            sensor_data = {
-                                'temperature': parsed_message.get('value')
+                        sensor_data = {
+                                parsed_message.get('sensor_id'): parsed_message.get('value')
                             }
                         self.sensor_data_queue.put(sensor_data)
                     else:
@@ -110,30 +123,27 @@ class LabPneumoStand(tk.Tk):
             while not self.sensor_data_queue.empty():
                 data = self.sensor_data_queue.get_nowait()
                 for sensor_id, value in data.items():
-                    self.sensors[sensor_id]['value'] = value
-                    self.update_sensor(sensor_id)
+                    sensor = self.sensors.get(sensor_id)
+                    sensor.value = value
+                    self.update_sensor(sensor)
         finally:
             self.after(500, self.update_sensor_values_from_queue)
 
     def initialize_sensors(self):
-        for sensor_id in self.sensors:
-            self.update_sensor(sensor_id)
+        for sensor in self.sensors.values():
+            self.update_sensor(sensor)
 
-    def update_sensor(self, sensor_id):
-        sensor = self.sensors[sensor_id]
-        value = sensor['value']
-        sensor_x = 250 + (100 * list(self.sensors.keys()).index(sensor_id))
-        self.canvas.coords(sensor['rectangle'], sensor_x, 76, sensor_x + 40, 116)
-        self.canvas.itemconfig(sensor['text'], text=f"{value}")
+    def update_sensor(self, sensor):
+        # self.canvas.coords(sensor.rectangle, sensor_x, sensor.coord_y - 20, sensor_x + 40, sensor.coord_y + 20)
+        self.canvas.itemconfig(sensor.text, text=f"{sensor.value}")
 
-    def toggle_valve(self):
-        current_status = self.valve_status.get()
-        self.valve_status.set(not current_status)
-        new_color = 'green' if self.valve_status.get() else 'red'
-        new_text = 'ON' if self.valve_status.get() else 'OFF'
-        send_message(serial_connection, json.dumps({"type": 1, "command": 17, "valve": 3, "result": 1}))
-        self.canvas.itemconfig(self.valve, fill=new_color)
-        self.canvas.itemconfig(self.valve_text, text=new_text, fill=new_color)
+    def toggle_valve(self, valve):
+        valve.toggle()
+        new_color = 'green' if valve.status else 'red'
+        new_text = 'ON' if valve.status else 'OFF'
+        send_message(serial_connection, json.dumps({"type": 1, "command": 17, "valve": valve.id, "result": 1}))
+        self.canvas.itemconfig(valve.shape, fill=new_color)
+        self.canvas.itemconfig(valve.label, text=new_text, fill=new_color)
 
 if __name__ == "__main__":
     app = LabPneumoStand()
