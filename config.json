@@ -43,6 +43,13 @@
             "end_x": 705,
             "end_y": 126,
             "width": 2
+        },
+        {
+            "start_x": 50,
+            "start_y": 50,
+            "end_x": 705,
+            "end_y": 70,
+            "width": 2
         }
     ]
 }

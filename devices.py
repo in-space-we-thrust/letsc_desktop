@@ -1,20 +1,33 @@
 import json
 
-
-class Sensor:
-    def __init__(self, id, port, name, units, coord_x, coord_y):
+class Device:
+    def __init__(self, id, port, name, coord_x, coord_y):
         self.id = id
         self.port = port
         self.name = name
-        self.units = units
         self.coord_x = coord_x
         self.coord_y = coord_y
+
+    def __str__(self):
+        return f"{self.__class__.__name__} {self.id}: {self.name}"
+
+    @classmethod
+    def from_json(cls, json_data):
+        return cls(
+            id=json_data['id'],
+            port=json_data['port'],
+            name=json_data['name'],
+            coord_x=json_data['coord_x'],
+            coord_y=json_data['coord_y']
+        )
+
+class Sensor(Device):
+    def __init__(self, id, port, name, units, coord_x, coord_y):
+        super().__init__(id, port, name, coord_x, coord_y)
+        self.units = units
         self.value = None
         self.rectangle = None
         self.text = None
-
-    def __str__(self):
-        return f"Sensor {self.id}: {self.name} ({self.units})"
 
     @classmethod
     def from_json(cls, json_data):
@@ -27,13 +40,9 @@ class Sensor:
             coord_y=json_data['coord_y']
         )
 
-class Valve:
+class Valve(Device):
     def __init__(self, id, port, name, coord_x, coord_y):
-        self.id = id
-        self.port = port
-        self.name = name
-        self.coord_x = coord_x
-        self.coord_y = coord_y
+        super().__init__(id, port, name, coord_x, coord_y)
         self.status = False  # Изначально клапан закрыт
         self.shape = None
         self.label = None
