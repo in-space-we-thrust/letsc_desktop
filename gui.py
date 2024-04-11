@@ -4,6 +4,7 @@ import os
 import threading
 from queue import Queue
 import time
+import math
 
 import serial
 import json
@@ -20,11 +21,19 @@ from devices import Sensor, Valve
 class LabPneumoStand(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.geometry("755x252")
+        self.geometry("1280x768")
         self.title("Laboratory Pneumo Stand Control")
 
-        self.canvas = tk.Canvas(self, width=755, height=252)
+        self.canvas = tk.Canvas(self, width=1280, height=768, bg='white')
         self.canvas.pack()
+
+        # Рисование координатной сетки
+        for x in range(0, 1280, 50):
+            self.canvas.create_line(x, 0, x, 768, fill='lightgray', dash=(2, 2))
+            self.canvas.create_text(x, 5, text=str(x), anchor=tk.NW)
+        for y in range(0, 768, 50):
+            self.canvas.create_line(0, y, 1280, y, fill='lightgray', dash=(2, 2))
+            self.canvas.create_text(5, y, text=str(y), anchor=tk.NW)
 
         self.sensors = {}
         self.valves = {}
@@ -84,9 +93,63 @@ class LabPneumoStand(tk.Tk):
         valve.button = tk.Button(self, text="Toggle Valve", command=lambda: self.toggle_valve(valve))
         valve.button.place(x=valve.coord_x - 15, y=valve.coord_y+44)
 
+    def draw_tank(self, center_x, center_y, thickness, height, curvature, fill='lightblue'):
+        # Вычисляем координаты углов прямоугольника, описывающего бак
+        x1 = center_x - thickness / 2
+        y1 = center_y - height / 2
+        x2 = center_x + thickness / 2
+        y2 = center_y + height / 2
+
+        # Отрисовываем прямоугольную часть бака
+        tank_rect = self.canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline='black')
+
+        return tank_rect
+
+    def draw_combustion_chamber(self, center_x, center_y, width, height, nozzle_start_radius, nozzle_end_radius, nozzle_length, nozzle_orientation):
+        # Рисуем камеру сгорания
+        chamber_left = center_x - width / 2
+        chamber_right = center_x + width / 2
+        chamber_top = center_y - height / 2
+        chamber_bottom = center_y + height / 2
+        self.canvas.create_rectangle(chamber_left, chamber_top, chamber_right, chamber_bottom, fill="gray")
+
+        # Рисуем сопло Белла
+        nozzle_start_x = chamber_right if nozzle_orientation == "right" else chamber_left - nozzle_length
+        nozzle_start_y = center_y
+        nozzle_end_x = nozzle_start_x + nozzle_length if nozzle_orientation == "right" else nozzle_start_x - nozzle_length
+        nozzle_end_y = center_y
+
+        # Расчет точек кривой Белла
+        num_points = 50
+        bell_curve_points = []
+        for i in range(num_points + 1):
+            t = i / num_points
+            x = nozzle_start_x + t * (nozzle_end_x - nozzle_start_x)
+            radius = nozzle_start_radius + (nozzle_end_radius - nozzle_start_radius) * (1 - math.cos(math.pi * t)) / 2
+            y_top = nozzle_start_y - radius
+            y_bottom = nozzle_start_y + radius
+            bell_curve_points.append((x, y_top))
+
+        for i in range(num_points, -1, -1):
+            t = i / num_points
+            x = nozzle_start_x + t * (nozzle_end_x - nozzle_start_x)
+            radius = nozzle_start_radius + (nozzle_end_radius - nozzle_start_radius) * (1 - math.cos(math.pi * t)) / 2
+            y_top = nozzle_start_y - radius
+            y_bottom = nozzle_start_y + radius
+            bell_curve_points.append((x, y_bottom))
+
+        # Рисуем кривую Белла
+        self.canvas.create_polygon(bell_curve_points, fill="gray")
+
     def initialize_lines(self):
         for line in self.lines:
             self.canvas.create_line(line['start_x'], line['start_y'], line['end_x'], line['end_y'], width=line['width'])
+
+        self.draw_tank(50, 500, 50, 100, 0.2)
+        self.draw_tank(650, 175, 50, 100, 0.2, 'red')
+        self.draw_tank(650, 625, 50, 100, 0.2, 'blue')
+
+        self.draw_combustion_chamber(1050, 325, 30, 52, 20, 40, 80, "right")
 
     # def fetch_sensor_test_data(self):
     #     while True:
