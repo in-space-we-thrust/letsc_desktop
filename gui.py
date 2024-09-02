@@ -151,16 +151,6 @@ class LabPneumoStand(tk.Tk):
 
         self.draw_combustion_chamber(1050, 325, 30, 52, 20, 40, 80, "right")
 
-    # def fetch_sensor_test_data(self):
-    #     while True:
-    #         sensor_data = {
-    #             'velocity': random.randint(0, 100),
-    #             'temperature': random.randint(20, 30),
-    #             'pressure': random.randint(1, 10)
-    #         }
-    #         self.sensor_data_queue.put(sensor_data)
-    #         time.sleep(0.5)  # Simulate the delay of data fetching
-
     def fetch_sensor_data(self):
         while True:
             for port, connection in self.serial_connections.items():
