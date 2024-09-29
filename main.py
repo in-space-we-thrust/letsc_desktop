@@ -1,4 +1,3 @@
-import tkinter as tk
 from lab_pneumo_logic import LabPneumoLogic
 from gui_factory import create_gui
 

@@ -89,10 +89,10 @@ class LabPneumoLogic:
         try:
             while not self.sensor_data_queue.empty():
                 data = self.sensor_data_queue.get_nowait()
-                for sensor_id, value in data.items():
+                for sensor_id, raw_value in data.items():
                     sensor = self.sensors.get(sensor_id)
                     if sensor:
-                        sensor.value = value
+                        sensor.process_signal(raw_value)
                         self.drawing.update_sensor(sensor)
         finally:
             self.drawing.root.after(100, self.update_sensor_values_from_queue)
@@ -100,7 +100,7 @@ class LabPneumoLogic:
     def toggle_valve(self, valve):
         connection = self.serial_connections.get(valve.port)
         if connection:
-            send_message(connection, json.dumps({"type": 1, "command": 17, "valve": valve.id, "result": 1}))
+            send_message(connection, json.dumps({"type": 1, "command": 17, "valve": valve.id, "result": 0}))
             valve.toggle()
             self.drawing.toggle_valve(valve)
         else:

@@ -26,11 +26,47 @@
         },
         {
             "id": 5,
-            "port": "COM8",
+            "port": "COM6",
             "name": "FS_2",
             "units": "m/h",
             "coord_x": 350,
-            "coord_y": 525
+            "coord_y": 525,
+            "processing": {
+                "offset": 12345, 
+                "calibration_factor": 1.005,
+                "calibration_table": {
+                    "enabled": true,
+                    "points": [
+                        [0, 0],
+                        [100, 10],
+                        [200, 20],
+                        [300, 30]
+                    ]
+                },
+                "filters": {
+                    "moving_average": 5, 
+                    "kalman": {
+                        "process_noise": 0.01,
+                        "measurement_noise": 0.1
+                    }
+                },
+                "outlier_detection": {
+                    "enabled": true,
+                    "threshold": 10  
+                },
+                "temperature_compensation": {
+                    "enabled": true,
+                    "compensation_factor": 0.001
+                },
+                "custom_processing": {
+                    "module": "custom_processing_module",  
+                    "function": "custom_function",         
+                    "params": {                            
+                        "factor": 2.0,
+                        "offset": 5.0
+                    }
+                }
+            }
         }
     ],
 
