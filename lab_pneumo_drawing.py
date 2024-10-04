@@ -1,5 +1,9 @@
 import tkinter as tk
 import math
+import matplotlib.pyplot as plt
+import time
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from abc import ABC, abstractmethod
 
 class DrawingStrategy(ABC):
@@ -27,6 +31,7 @@ class TkinterDrawing(DrawingStrategy):
         self.root.title(title)
         self.canvas = tk.Canvas(self.root, width=1280, height=768, bg='white')
         self.canvas.pack()
+        self.graph_shown = False
 
     def initialize_ui(self, sensors, valves, lines, toggle_valve_callback):
         self.draw_grid(self.canvas_width, self.canvas_height)
@@ -35,6 +40,10 @@ class TkinterDrawing(DrawingStrategy):
         self.initialize_lines(lines)
         self.draw_tanks()
         self.draw_combustion_chamber()
+
+        # Добавляем кнопку для открытия графиков
+        self.show_graph_button = tk.Button(self.root, text="Show Graph", command=lambda: self.show_graph_window(sensors))
+        self.show_graph_button.place(x=50, y=20)
 
     def run(self):
         self.root.mainloop()
@@ -50,6 +59,10 @@ class TkinterDrawing(DrawingStrategy):
     def initialize_sensors(self, sensors):
         for sensor in sensors.values():
             self.draw_sensor(sensor)
+
+        # Данные для графиков
+        self.graph_time_data = []
+        self.graph_sensor_data = {sensor_id: [] for sensor_id in sensors}
 
     def initialize_valves(self, valves, toggle_valve_callback):
         for valve in valves.values():
@@ -133,3 +146,41 @@ class TkinterDrawing(DrawingStrategy):
         new_text = 'ON' if valve.status else 'OFF'
         self.canvas.itemconfig(valve.shape, fill=new_color)
         self.canvas.itemconfig(valve.label, text=new_text, fill=new_color)
+
+    def show_graph_window(self, sensors):
+        print("Opening graph window...")
+        self.graph_window = tk.Toplevel(self.root)
+        self.graph_window.title("Sensor Data Graphs")
+        self.graph_window.geometry("600x400")
+
+        # Создаем фигуру matplotlib
+        self.fig = Figure(figsize=(5, 4), dpi=100)
+        self.ax = self.fig.add_subplot(111)
+        
+
+        # Создаем холст FigureCanvasTkAgg
+        self.graph_canvas = FigureCanvasTkAgg(self.fig, master=self.graph_window)
+        self.graph_canvas.draw()
+        self.graph_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        self.graph_shown = True
+
+
+    def update_graph(self, sensors):
+        current_time = time.time()
+        self.graph_time_data.append(current_time)
+
+        # Обновляем данные сенсоров
+        for sensor_id, sensor in sensors.items():
+            self.graph_sensor_data[sensor_id].append(sensor.value)
+
+        if self.graph_shown:
+            # Очищаем график и рисуем новые данные
+            self.ax.clear()
+            for sensor_id, data in self.graph_sensor_data.items():
+                self.ax.plot(self.graph_time_data, data, label=f"Sensor {sensor_id}")
+
+
+            self.ax.set_xlabel("Time")
+            self.ax.set_ylabel("Value")
+            self.graph_canvas.draw()

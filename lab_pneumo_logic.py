@@ -95,7 +95,9 @@ class LabPneumoLogic:
                         sensor.process_signal(raw_value)
                         self.drawing.update_sensor(sensor)
         finally:
+            self.drawing.update_graph(self.sensors)
             self.drawing.root.after(100, self.update_sensor_values_from_queue)
+            
 
     def toggle_valve(self, valve):
         connection = self.serial_connections.get(valve.port)
