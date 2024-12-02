@@ -6,6 +6,8 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from abc import ABC, abstractmethod
 
+GRAPH_TIME_WINDOW = 30  # seconds - окно отображения графика
+
 class DrawingStrategy(ABC):
     @abstractmethod
     def initialize_ui(self, sensors, valves, lines, toggle_valve_callback):
@@ -211,24 +213,25 @@ class TkinterDrawing(DrawingStrategy):
         if not self.graph_shown or not self.current_sensor:
             return
 
-        current_time = time.time() - self.start_time  # Используем относительное время
+        current_time = time.time() - self.start_time
         self.graph_time_data.append(current_time)
         sensor_id = self.current_sensor.id
         
-        # Добавляем текущее значение в историю
-        if self.current_sensor.value is not None:  # Проверяем, что значение существует
+        if self.current_sensor.value is not None:
             self.graph_sensor_data[sensor_id].append(self.current_sensor.value)
 
-            # Проверяем, что массивы одинаковой длины
-            while len(self.graph_time_data) > len(self.graph_sensor_data[sensor_id]):
+            # Используем константу GRAPH_TIME_WINDOW
+            while len(self.graph_time_data) > 0 and current_time - self.graph_time_data[0] > GRAPH_TIME_WINDOW:
                 self.graph_time_data.pop(0)
-            while len(self.graph_time_data) < len(self.graph_sensor_data[sensor_id]):
                 self.graph_sensor_data[sensor_id].pop(0)
 
-            # Обновляем график
             self.ax.clear()
             self.ax.plot(self.graph_time_data, self.graph_sensor_data[sensor_id],
                         label=f"{self.current_sensor.name}")
+            
+            # Используем константу GRAPH_TIME_WINDOW
+            self.ax.set_xlim([max(0, current_time - GRAPH_TIME_WINDOW), current_time])
+            
             self.ax.set_xlabel("Time (s)")
             self.ax.set_ylabel(f"Value ({self.current_sensor.units})")
             self.ax.legend()

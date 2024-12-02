@@ -9,7 +9,7 @@
             "coord_y": 80
         },
         {
-            "id": 25,
+            "id": 17,
             "port": "COM6",
             "name": "TS_1",
             "units": "°C",
