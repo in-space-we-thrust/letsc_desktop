@@ -3,6 +3,8 @@ import threading
 import time
 import json
 import os
+import csv
+from datetime import datetime
 from communication import connect_to_serial_port, send_message, receive_message, parse_message
 from devices import Sensor, Valve
 
@@ -16,10 +18,14 @@ class LabPneumoLogic:
         self.serial_connections = {}
         self.serial_queue = queue.Queue()
         self.stop_event = threading.Event()
+        self.csv_file = None
+        self.csv_writer = None
+        self.start_time = time.time()
 
         self.load_config_and_connect()
         self.initialize_ui()
         self.start_serial_threads()
+        self.initialize_csv_logging()
 
         self.drawing.root.after(100, self.process_serial_data)
         self.drawing.root.after(100, self.update_sensor_values_from_queue)
@@ -94,10 +100,36 @@ class LabPneumoLogic:
                     if sensor:
                         sensor.process_signal(raw_value)
                         self.drawing.update_sensor(sensor)
+                        self.write_sensor_data_to_csv()
         finally:
             self.drawing.update_graph(self.sensors)
             self.drawing.root.after(100, self.update_sensor_values_from_queue)
-            
+
+    def initialize_csv_logging(self):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"sensor_data_{timestamp}.csv"
+        self.csv_file = open(filename, 'w', newline='')
+        
+        # Создаем заголовки для CSV файла
+        headers = ['Timestamp', 'Relative_Time']
+        for sensor in self.sensors.values():
+            headers.append(f"{sensor.name} ({sensor.units})")
+        
+        self.csv_writer = csv.writer(self.csv_file)
+        self.csv_writer.writerow(headers)
+
+    def write_sensor_data_to_csv(self):
+        current_time = time.time()
+        relative_time = current_time - self.start_time
+        timestamp = datetime.fromtimestamp(current_time).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        
+        # Собираем значения всех сенсоров
+        row = [timestamp, f"{relative_time:.3f}"]
+        for sensor in self.sensors.values():
+            row.append(str(sensor.value) if sensor.value is not None else '')
+        
+        self.csv_writer.writerow(row)
+        self.csv_file.flush()  # Сразу записываем в файл
 
     def toggle_valve(self, valve):
         connection = self.serial_connections.get(valve.port)
@@ -109,6 +141,8 @@ class LabPneumoLogic:
             print(f"No connection for valve {valve.id}")
 
     def on_closing(self):
+        if self.csv_file:
+            self.csv_file.close()
         self.stop_event.set()
         time.sleep(1)
         self.drawing.root.destroy()
