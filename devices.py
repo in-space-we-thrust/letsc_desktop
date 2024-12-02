@@ -51,6 +51,8 @@ class Sensor(Device):
         offset = self.processing.get('offset', 0)
         if offset:
             value = self.compensate_offset(raw_value, offset)
+        else:
+            value = raw_value
 
         # 2. Применение калибровочной таблицы
         if self.processing.get('calibration_table', {}).get('enabled', False):

@@ -32,6 +32,8 @@ class TkinterDrawing(DrawingStrategy):
         self.canvas = tk.Canvas(self.root, width=1280, height=768, bg='white')
         self.canvas.pack()
         self.graph_shown = False
+        self.current_sensor = None  # Add this line to track current sensor
+        self.start_time = time.time()  # Добавляем начальное время
 
     def initialize_ui(self, sensors, valves, lines, toggle_valve_callback):
         self.draw_grid(self.canvas_width, self.canvas_height)
@@ -40,10 +42,6 @@ class TkinterDrawing(DrawingStrategy):
         self.initialize_lines(lines)
         self.draw_tanks()
         self.draw_combustion_chamber()
-
-        # Добавляем кнопку для открытия графиков
-        self.show_graph_button = tk.Button(self.root, text="Show Graph", command=lambda: self.show_graph_window(sensors))
-        self.show_graph_button.place(x=50, y=20)
 
     def run(self):
         self.root.mainloop()
@@ -57,12 +55,21 @@ class TkinterDrawing(DrawingStrategy):
             self.canvas.create_text(5, y, text=str(y), anchor=tk.NW)
 
     def initialize_sensors(self, sensors):
+        self.sensors = sensors
         for sensor in sensors.values():
             self.draw_sensor(sensor)
 
         # Данные для графиков
         self.graph_time_data = []
         self.graph_sensor_data = {sensor_id: [] for sensor_id in sensors}
+        
+        # Добавляем общую привязку для всех тегов сенсоров
+        for sensor in sensors.values():
+            self.canvas.tag_bind(
+                f"sensor_{sensor.id}",
+                '<Button-1>', 
+                lambda event, s=sensor: self.show_graph_window(s)
+            )
 
     def initialize_valves(self, valves, toggle_valve_callback):
         for valve in valves.values():
@@ -86,10 +93,42 @@ class TkinterDrawing(DrawingStrategy):
         self.draw_combustion_chamber_shape(1050, 325, 30, 52, 20, 40, 80, "right")
 
     def draw_sensor(self, sensor):
-        sensor.rectangle = self.canvas.create_rectangle(sensor.coord_x, sensor.coord_y - 20, sensor.coord_x + 40, sensor.coord_y + 20, outline='green')
-        sensor.name_text = self.canvas.create_text(sensor.coord_x, sensor.coord_y-13, anchor=tk.W, text=sensor.name, fill='black')
-        sensor.text = self.canvas.create_text(sensor.coord_x + 20, sensor.coord_y, text=f"{sensor.value}", fill='black')
-        sensor.units_text = self.canvas.create_text(sensor.coord_x+20, sensor.coord_y+13, anchor=tk.W, text=sensor.units, fill='black')
+        sensor_tag = f"sensor_{sensor.id}"
+        
+        # Создаем прямоугольник с очень светлым фоном
+        sensor.rectangle = self.canvas.create_rectangle(
+            sensor.coord_x, sensor.coord_y - 20, 
+            sensor.coord_x + 40, sensor.coord_y + 20, 
+            outline='green',
+            fill='#FAFAFA',  # Очень светлый фон вместо прозрачного
+            tags=sensor_tag
+        )
+        
+        # Добавляем тег ко всем элементам
+        sensor.name_text = self.canvas.create_text(
+            sensor.coord_x, sensor.coord_y-13, 
+            anchor=tk.W, 
+            text=sensor.name, 
+            fill='black',
+            tags=sensor_tag
+        )
+        
+        sensor.text = self.canvas.create_text(
+            sensor.coord_x + 20, 
+            sensor.coord_y, 
+            text=f"{sensor.value}", 
+            fill='black',
+            tags=sensor_tag
+        )
+        
+        sensor.units_text = self.canvas.create_text(
+            sensor.coord_x+20, 
+            sensor.coord_y+13, 
+            anchor=tk.W, 
+            text=sensor.units, 
+            fill='black',
+            tags=sensor_tag
+        )
 
     def draw_valve(self, valve):
         vertices = [(valve.coord_x-7, valve.coord_y - 10), (valve.coord_x + 7, valve.coord_y), (valve.coord_x - 7, valve.coord_y + 10)]
@@ -147,40 +186,50 @@ class TkinterDrawing(DrawingStrategy):
         self.canvas.itemconfig(valve.shape, fill=new_color)
         self.canvas.itemconfig(valve.label, text=new_text, fill=new_color)
 
-    def show_graph_window(self, sensors):
-        print("Opening graph window...")
+    def show_graph_window(self, sensor):
+        print(f"Opening graph window for sensor {sensor.name}...")
+        self.current_sensor = sensor
+        
+        # Очищаем историю при открытии нового окна
+        self.graph_time_data = []
+        self.graph_sensor_data[sensor.id] = []
+        
         self.graph_window = tk.Toplevel(self.root)
-        self.graph_window.title("Sensor Data Graphs")
+        self.graph_window.title(f"Sensor {sensor.name} Data")
         self.graph_window.geometry("600x400")
 
-        # Создаем фигуру matplotlib
         self.fig = Figure(figsize=(5, 4), dpi=100)
         self.ax = self.fig.add_subplot(111)
         
-
-        # Создаем холст FigureCanvasTkAgg
         self.graph_canvas = FigureCanvasTkAgg(self.fig, master=self.graph_window)
         self.graph_canvas.draw()
         self.graph_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         self.graph_shown = True
 
-
     def update_graph(self, sensors):
-        current_time = time.time()
+        if not self.graph_shown or not self.current_sensor:
+            return
+
+        current_time = time.time() - self.start_time  # Используем относительное время
         self.graph_time_data.append(current_time)
+        sensor_id = self.current_sensor.id
+        
+        # Добавляем текущее значение в историю
+        if self.current_sensor.value is not None:  # Проверяем, что значение существует
+            self.graph_sensor_data[sensor_id].append(self.current_sensor.value)
 
-        # Обновляем данные сенсоров
-        for sensor_id, sensor in sensors.items():
-            self.graph_sensor_data[sensor_id].append(sensor.value)
+            # Проверяем, что массивы одинаковой длины
+            while len(self.graph_time_data) > len(self.graph_sensor_data[sensor_id]):
+                self.graph_time_data.pop(0)
+            while len(self.graph_time_data) < len(self.graph_sensor_data[sensor_id]):
+                self.graph_sensor_data[sensor_id].pop(0)
 
-        if self.graph_shown:
-            # Очищаем график и рисуем новые данные
+            # Обновляем график
             self.ax.clear()
-            for sensor_id, data in self.graph_sensor_data.items():
-                self.ax.plot(self.graph_time_data, data, label=f"Sensor {sensor_id}")
-
-
-            self.ax.set_xlabel("Time")
-            self.ax.set_ylabel("Value")
+            self.ax.plot(self.graph_time_data, self.graph_sensor_data[sensor_id],
+                        label=f"{self.current_sensor.name}")
+            self.ax.set_xlabel("Time (s)")
+            self.ax.set_ylabel(f"Value ({self.current_sensor.units})")
+            self.ax.legend()
             self.graph_canvas.draw()
