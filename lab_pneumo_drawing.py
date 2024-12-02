@@ -35,6 +35,7 @@ class TkinterDrawing(DrawingStrategy):
         self.canvas.pack()
         self.graph_shown = False
         self.current_sensor = None  # Add this line to track current sensor
+        self.graph_windows = {}  # Словарь для хранения всех открытых окон графиков
         self.start_time = time.time()  # Добавляем начальное время
 
     def initialize_ui(self, sensors, valves, lines, toggle_valve_callback):
@@ -190,49 +191,79 @@ class TkinterDrawing(DrawingStrategy):
 
     def show_graph_window(self, sensor):
         print(f"Opening graph window for sensor {sensor.name}...")
-        self.current_sensor = sensor
         
-        # Очищаем историю при открытии нового окна
-        self.graph_time_data = []
-        self.graph_sensor_data[sensor.id] = []
+        # Если окно для этого сенсора уже открыто, показываем его
+        if sensor.id in self.graph_windows:
+            self.graph_windows[sensor.id]['window'].lift()
+            return
+            
+        graph_window = tk.Toplevel(self.root)
+        graph_window.title(f"Sensor {sensor.name} Data")
+        graph_window.geometry("600x400")
         
-        self.graph_window = tk.Toplevel(self.root)
-        self.graph_window.title(f"Sensor {sensor.name} Data")
-        self.graph_window.geometry("600x400")
+        fig = Figure(figsize=(5, 4), dpi=100)
+        ax = fig.add_subplot(111)
+        
+        graph_canvas = FigureCanvasTkAgg(fig, master=graph_window)
+        graph_canvas.draw()
+        graph_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        self.fig = Figure(figsize=(5, 4), dpi=100)
-        self.ax = self.fig.add_subplot(111)
+        # Сохраняем информацию об окне графика
+        self.graph_windows[sensor.id] = {
+            'window': graph_window,
+            'figure': fig,
+            'ax': ax,
+            'canvas': graph_canvas,
+            'time_data': [],
+            'sensor_data': []
+        }
         
-        self.graph_canvas = FigureCanvasTkAgg(self.fig, master=self.graph_window)
-        self.graph_canvas.draw()
-        self.graph_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
+        # Обработчик закрытия окна
+        graph_window.protocol("WM_DELETE_WINDOW", 
+                            lambda s=sensor.id: self.on_graph_window_close(s))
+        
         self.graph_shown = True
 
+    def on_graph_window_close(self, sensor_id):
+        """Обработчик закрытия окна графика"""
+        if sensor_id in self.graph_windows:
+            self.graph_windows[sensor_id]['window'].destroy()
+            del self.graph_windows[sensor_id]
+        
+        if not self.graph_windows:  # Если больше нет открытых окон
+            self.graph_shown = False
+
     def update_graph(self, sensors):
-        if not self.graph_shown or not self.current_sensor:
+        if not self.graph_shown or not self.graph_windows:
             return
 
         current_time = time.time() - self.start_time
-        self.graph_time_data.append(current_time)
-        sensor_id = self.current_sensor.id
-        
-        if self.current_sensor.value is not None:
-            self.graph_sensor_data[sensor_id].append(self.current_sensor.value)
 
-            # Используем константу GRAPH_TIME_WINDOW
-            while len(self.graph_time_data) > 0 and current_time - self.graph_time_data[0] > GRAPH_TIME_WINDOW:
-                self.graph_time_data.pop(0)
-                self.graph_sensor_data[sensor_id].pop(0)
+        # Обновляем каждый открытый график
+        for sensor_id, graph_data in self.graph_windows.items():
+            sensor = sensors.get(sensor_id)
+            if not sensor or sensor.value is None:
+                continue
 
-            self.ax.clear()
-            self.ax.plot(self.graph_time_data, self.graph_sensor_data[sensor_id],
-                        label=f"{self.current_sensor.name}")
+            # Добавляем новые данные
+            graph_data['time_data'].append(current_time)
+            graph_data['sensor_data'].append(sensor.value)
+
+            # Удаляе�� старые данные
+            while (len(graph_data['time_data']) > 0 and 
+                   current_time - graph_data['time_data'][0] > GRAPH_TIME_WINDOW):
+                graph_data['time_data'].pop(0)
+                graph_data['sensor_data'].pop(0)
+
+            # Обновляем график
+            graph_data['ax'].clear()
+            graph_data['ax'].plot(graph_data['time_data'], 
+                                graph_data['sensor_data'],
+                                label=sensor.name)
             
-            # Используем константу GRAPH_TIME_WINDOW
-            self.ax.set_xlim([max(0, current_time - GRAPH_TIME_WINDOW), current_time])
-            
-            self.ax.set_xlabel("Time (s)")
-            self.ax.set_ylabel(f"Value ({self.current_sensor.units})")
-            self.ax.legend()
-            self.graph_canvas.draw()
+            graph_data['ax'].set_xlim([max(0, current_time - GRAPH_TIME_WINDOW), 
+                                     current_time])
+            graph_data['ax'].set_xlabel("Time (s)")
+            graph_data['ax'].set_ylabel(f"Value ({sensor.units})")
+            graph_data['ax'].legend()
+            graph_data['canvas'].draw()
