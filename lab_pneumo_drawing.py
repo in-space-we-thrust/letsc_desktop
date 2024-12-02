@@ -2,11 +2,15 @@ import tkinter as tk
 import math
 import matplotlib.pyplot as plt
 import time
+import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from abc import ABC, abstractmethod
 
-GRAPH_TIME_WINDOW = 30  # seconds - окно отображения графика
+GRAPH_TIME_WINDOW = 30  # seconds
+GRAPH_UPDATE_INTERVAL = 200  # ms
+MAX_POINTS = 100  # максимальное количество точек на графике
+GRAPH_ANIMATION_INTERVAL = 50  # ms, интервал для анимации
 
 class DrawingStrategy(ABC):
     @abstractmethod
@@ -37,6 +41,10 @@ class TkinterDrawing(DrawingStrategy):
         self.current_sensor = None  # Add this line to track current sensor
         self.graph_windows = {}  # Словарь для хранения всех открытых окон графиков
         self.start_time = time.time()  # Добавляем начальное время
+        self.last_update_time = 0
+        self.update_counter = 0
+        plt.style.use('fast')  # Используем быстрый стиль для matplotlib
+        self.animation_running = {}  # Добавляем флаг для отслеживания анимации
 
     def initialize_ui(self, sensors, valves, lines, toggle_valve_callback):
         self.draw_grid(self.canvas_width, self.canvas_height)
@@ -192,17 +200,38 @@ class TkinterDrawing(DrawingStrategy):
     def show_graph_window(self, sensor):
         print(f"Opening graph window for sensor {sensor.name}...")
         
-        # Если окно для этого сенсора уже открыто, показываем его
+        # Проверяем существование окна и его валидность
         if sensor.id in self.graph_windows:
-            self.graph_windows[sensor.id]['window'].lift()
-            return
+            try:
+                self.graph_windows[sensor.id]['window'].state()  # Проверяем, существует ли окно
+                self.graph_windows[sensor.id]['window'].lift()
+                return
+            except tk.TclError:  # Если окно было закрыто некорректно
+                del self.graph_windows[sensor.id]
+                if sensor.id in self.animation_running:
+                    del self.animation_running[sensor.id]
             
+        # Создаем новое окно
         graph_window = tk.Toplevel(self.root)
         graph_window.title(f"Sensor {sensor.name} Data")
         graph_window.geometry("600x400")
         
+        # Оптимизация настроек Figure
         fig = Figure(figsize=(5, 4), dpi=100)
+        fig.set_facecolor('#f0f0f0')
+        
         ax = fig.add_subplot(111)
+        ax.set_facecolor('#f0f0f0')
+        
+        # Настройка сетки
+        ax.grid(True, linestyle='--', alpha=0.7)  # Включаем сетку с пунктирным стилем
+        ax.set_axisbelow(True)  # Помещаем сетку под графиком
+        
+        # Создаем линию единожды
+        line, = ax.plot([], [], label=sensor.name, linewidth=1.5)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel(f"Value ({sensor.units})")
+        ax.legend()
         
         graph_canvas = FigureCanvasTkAgg(fig, master=graph_window)
         graph_canvas.draw()
@@ -213,57 +242,106 @@ class TkinterDrawing(DrawingStrategy):
             'window': graph_window,
             'figure': fig,
             'ax': ax,
+            'line': line,  # Сохраняем линию
             'canvas': graph_canvas,
-            'time_data': [],
-            'sensor_data': []
+            'time_data': np.zeros(MAX_POINTS),
+            'sensor_data': np.zeros(MAX_POINTS),
+            'data_index': 0,
+            'data_filled': False,
+            'last_update': time.time(),
+            'update_interval': GRAPH_UPDATE_INTERVAL/1000.0,
+            'background': None  # Для двойной буферизации
         }
         
-        # Обработчик закрытия окна
-        graph_window.protocol("WM_DELETE_WINDOW", 
-                            lambda s=sensor.id: self.on_graph_window_close(s))
+        # Сохраняем фон для быстрой перерисовки
+        self.graph_windows[sensor.id]['background'] = graph_canvas.copy_from_bbox(ax.bbox)
         
+        # Запускаем отдельную анимацию для каждого графика
+        self.animation_running[sensor.id] = True
+        self.animate_graph(sensor.id)
         self.graph_shown = True
 
     def on_graph_window_close(self, sensor_id):
         """Обработчик закрытия окна графика"""
-        if sensor_id in self.graph_windows:
-            self.graph_windows[sensor_id]['window'].destroy()
-            del self.graph_windows[sensor_id]
+        try:
+            if sensor_id in self.graph_windows:
+                self.animation_running[sensor_id] = False
+                self.graph_windows[sensor_id]['window'].destroy()
+            
+            if sensor_id in self.graph_windows:
+                del self.graph_windows[sensor_id]
+            if sensor_id in self.animation_running:
+                del self.animation_running[sensor_id]
+            
+            if not self.graph_windows:
+                self.graph_shown = False
+        except Exception as e:
+            print(f"Error closing graph window: {e}")
+
+    def animate_graph(self, sensor_id):
+        """Отдельная функция анимации для каждого графика"""
+        if sensor_id not in self.graph_windows or not self.animation_running.get(sensor_id):
+            return
         
-        if not self.graph_windows:  # Если больше нет открытых окон
-            self.graph_shown = False
+        graph_data = self.graph_windows[sensor_id]
+        current_time = time.time() - self.start_time
+
+        # Получаем актуальные данные
+        if graph_data['data_filled']:
+            start_idx = (graph_data['data_index'] + 1) % MAX_POINTS
+            time_data = np.concatenate([
+                graph_data['time_data'][start_idx:],
+                graph_data['time_data'][:start_idx]
+            ])
+            sensor_data = np.concatenate([
+                graph_data['sensor_data'][start_idx:],
+                graph_data['sensor_data'][:start_idx]
+            ])
+        else:
+            time_data = graph_data['time_data'][:graph_data['data_index']]
+            sensor_data = graph_data['sensor_data'][:graph_data['data_index']]
+
+        # Обновляем данные линии и график
+        if len(time_data) > 0:
+            graph_data['line'].set_data(time_data, sensor_data)
+            graph_data['ax'].set_xlim(max(0, current_time - GRAPH_TIME_WINDOW), current_time)
+            
+            # Автоматически подстраиваем масштаб по Y
+            if len(sensor_data) > 0:
+                ymin, ymax = np.min(sensor_data), np.max(sensor_data)
+                padding = (ymax - ymin) * 0.1 if ymax > ymin else 1
+                graph_data['ax'].set_ylim(ymin - padding, ymax + padding)
+
+        # Перерисовываем график
+        graph_data['canvas'].draw()
+        
+        # Планируем следующее обновление
+        graph_data['window'].after(GRAPH_ANIMATION_INTERVAL, 
+                                 lambda: self.animate_graph(sensor_id))
 
     def update_graph(self, sensors):
         if not self.graph_shown or not self.graph_windows:
             return
 
-        current_time = time.time() - self.start_time
+        current_time = time.time()
+        if current_time - self.last_update_time < GRAPH_UPDATE_INTERVAL/1000.0:
+            return
+        
+        self.last_update_time = current_time
+        relative_time = current_time - self.start_time
 
-        # Обновляем каждый открытый график
+        # Обновляем данные для всех открытых графиков
         for sensor_id, graph_data in self.graph_windows.items():
             sensor = sensors.get(sensor_id)
             if not sensor or sensor.value is None:
                 continue
 
             # Добавляем новые данные
-            graph_data['time_data'].append(current_time)
-            graph_data['sensor_data'].append(sensor.value)
-
-            # Удаляе�� старые данные
-            while (len(graph_data['time_data']) > 0 and 
-                   current_time - graph_data['time_data'][0] > GRAPH_TIME_WINDOW):
-                graph_data['time_data'].pop(0)
-                graph_data['sensor_data'].pop(0)
-
-            # Обновляем график
-            graph_data['ax'].clear()
-            graph_data['ax'].plot(graph_data['time_data'], 
-                                graph_data['sensor_data'],
-                                label=sensor.name)
+            idx = graph_data['data_index']
+            graph_data['time_data'][idx] = relative_time
+            graph_data['sensor_data'][idx] = float(sensor.value)  # Преобразуем в float
             
-            graph_data['ax'].set_xlim([max(0, current_time - GRAPH_TIME_WINDOW), 
-                                     current_time])
-            graph_data['ax'].set_xlabel("Time (s)")
-            graph_data['ax'].set_ylabel(f"Value ({sensor.units})")
-            graph_data['ax'].legend()
-            graph_data['canvas'].draw()
+            # Обновляем индекс
+            graph_data['data_index'] = (idx + 1) % MAX_POINTS
+            if idx + 1 >= MAX_POINTS:
+                graph_data['data_filled'] = True
