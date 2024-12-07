@@ -3,9 +3,9 @@ import numpy as np
 from signal_processing import KalmanFilter
 
 class Device:
-    def __init__(self, id, port, name, coord_x, coord_y):
+    def __init__(self, id, connection, name, coord_x, coord_y):
         self.id = id
-        self.port = port
+        self.connection = connection  # Changed from port to connection
         self.name = name
         self.coord_x = coord_x
         self.coord_y = coord_y
@@ -17,15 +17,15 @@ class Device:
     def from_json(cls, json_data):
         return cls(
             id=json_data['id'],
-            port=json_data['port'],
+            connection=json_data['connection'],  # Changed from port to connection
             name=json_data['name'],
             coord_x=json_data['coord_x'],
             coord_y=json_data['coord_y']
         )
 
 class Sensor(Device):
-    def __init__(self, id, port, name, units, coord_x, coord_y, processing=None):
-        super().__init__(id, port, name, coord_x, coord_y)
+    def __init__(self, id, connection, name, units, coord_x, coord_y, processing=None):
+        super().__init__(id, connection, name, coord_x, coord_y)
         self.units = units
         self.value = None
         self.rectangle = None
@@ -38,7 +38,7 @@ class Sensor(Device):
     def from_json(cls, json_data):
         return cls(
             id=json_data['id'],
-            port=json_data['port'],
+            connection=json_data['connection'],  # Changed from port to connection
             name=json_data['name'],
             units=json_data['units'],
             coord_x=json_data['coord_x'],
@@ -159,8 +159,8 @@ class Sensor(Device):
             return value  # Возвращаем исходное значение, если произошла ошибка
 
 class Valve(Device):
-    def __init__(self, id, port, name, coord_x, coord_y, pin):
-        super().__init__(id, port, name, coord_x, coord_y)
+    def __init__(self, id, connection, name, coord_x, coord_y, pin):
+        super().__init__(id, connection, name, coord_x, coord_y)
         self.pin = pin # Номер пина, к которому подключен клапан
         self.status = False  # Изначально клапан закрыт
         self.shape = None
@@ -187,7 +187,7 @@ class Valve(Device):
     def from_json(cls, json_data):
         return cls(
             id=json_data['id'],
-            port=json_data['port'],
+            connection=json_data['connection'],  # Changed from port to connection
             name=json_data['name'],
             coord_x=json_data['coord_x'],
             coord_y=json_data['coord_y'],

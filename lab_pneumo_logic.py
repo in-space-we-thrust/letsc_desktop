@@ -5,8 +5,12 @@ import json
 import os
 import csv
 from datetime import datetime
-from communication import connect_to_serial_port, send_message, receive_message, parse_message
+from communication import create_connection  # Remove old imports, just use create_connection
 from devices import Sensor, Valve
+
+def make_connection_key(connection_config):
+    """Create a unique key for a connection configuration"""
+    return json.dumps(connection_config, sort_keys=True)
 
 class LabPneumoLogic:
     def __init__(self, drawing):
@@ -21,6 +25,8 @@ class LabPneumoLogic:
         self.csv_file = None
         self.csv_writer = None
         self.start_time = time.time()
+        self.connections = {}  # Dictionary to store all connections
+        self.message_queue = queue.Queue()  # Single queue for all messages
 
         self.load_config_and_connect()
         self.initialize_ui()
@@ -44,13 +50,22 @@ class LabPneumoLogic:
         for sensor_data in sensors_data:
             sensor = Sensor.from_json(sensor_data)
             self.sensors[sensor.id] = sensor
-            self.connect_to_port(sensor.port)
+            self.connect_device(sensor)
 
     def load_valves(self, valves_data):
         for valve_data in valves_data:
             valve = Valve.from_json(valve_data)
             self.valves[valve.id] = valve
-            self.connect_to_port(valve.port)
+            self.connect_device(valve)
+
+    def connect_device(self, device):
+        connection_key = make_connection_key(device.connection)
+        if connection_key not in self.connections:
+            connection = create_connection(device.connection)
+            if connection and connection.connect():
+                self.connections[connection_key] = connection
+                return True
+        return connection_key in self.connections
 
     def connect_to_port(self, port):
         if port not in self.serial_connections:
@@ -63,11 +78,33 @@ class LabPneumoLogic:
         self.drawing.initialize_ui(self.sensors, self.valves, self.lines, self.toggle_valve)
 
     def start_serial_threads(self):
-        for port, connection in self.serial_connections.items():
-            if connection is not None:  # Only start thread if connection exists
-                thread = threading.Thread(target=self.serial_read_thread, args=(port,))
-                thread.daemon = True
-                thread.start()
+        # Start a read thread for each connection
+        for connection_key, connection in self.connections.items():
+            thread = threading.Thread(
+                target=self.read_messages,
+                args=(connection_key, connection)
+            )
+            thread.daemon = True
+            thread.start()
+
+    def start_communication_threads(self):
+        for conn_key, connection in self.connections.items():
+            thread = threading.Thread(
+                target=self.read_messages,
+                args=(conn_key, connection)
+            )
+            thread.daemon = True
+            thread.start()
+
+    def read_messages(self, connection_key, connection):
+        while not self.stop_event.is_set():
+            try:
+                message = connection.read_message()
+                if message:
+                    self.message_queue.put((connection_key, message))
+            except Exception as e:
+                print(f"Error reading from {connection_key}: {e}")
+                time.sleep(0.1)
 
     def serial_read_thread(self, port):
         connection = self.serial_connections[port]
@@ -86,17 +123,18 @@ class LabPneumoLogic:
 
     def process_serial_data(self):
         try:
-            while not self.serial_queue.empty():
-                port, message = self.serial_queue.get_nowait()
-                parsed_message = parse_message(message)
-                if parsed_message and parsed_message.get('sensor_id'):
-                    sensor_id = parsed_message['sensor_id']
-                    value = parsed_message['value']
-                    self.sensor_data_queue.put({sensor_id: value})
-                else:
-                    print(f"Received command from {port}: {message}")
-        except queue.Empty:
-            pass
+            while not self.message_queue.empty():
+                connection_key, message = self.message_queue.get_nowait()
+                try:
+                    parsed_message = json.loads(message)
+                    if parsed_message and parsed_message.get('sensor_id'):
+                        sensor_id = parsed_message['sensor_id']
+                        value = parsed_message['value']
+                        self.sensor_data_queue.put({sensor_id: value})
+                    else:
+                        print(f"Received command from {connection_key}: {message}")
+                except json.JSONDecodeError:
+                    print(f"Invalid JSON message from {connection_key}: {message}")
         finally:
             self.drawing.root.after(100, self.process_serial_data)
 
@@ -141,36 +179,37 @@ class LabPneumoLogic:
         self.csv_file.flush()  # Сразу записываем в файл
 
     def toggle_valve(self, valve):
-        connection = self.serial_connections.get(valve.port)
+        connection_key = make_connection_key(valve.connection)
+        connection = self.connections.get(connection_key)
         if connection is None:
-            print(f"Warning: No connection available for valve {valve.id} on port {valve.port}")
+            print(f"Warning: No connection available for valve {valve.id}")
             return False
             
         try:
-            # First toggle the valve state
             valve.toggle()
-            
-            # Then send the command
             command = {
                 "type": 1,
                 "command": 17,
                 "valve_pin": valve.pin,
                 "result": 0
             }
-            send_message(connection, json.dumps(command))
-            
-            # Update UI
+            connection.send_message(json.dumps(command))
             self.drawing.toggle_valve(valve)
             return True
         except Exception as e:
             print(f"Error toggling valve {valve.id}: {e}")
-            # Revert valve state if command failed
-            valve.toggle()
+            valve.toggle()  # Revert state if failed
             return False
 
     def on_closing(self):
-        if self.csv_file:
-            self.csv_file.close()
         self.stop_event.set()
         time.sleep(1)
+        
+        # Close all connections
+        for connection in self.connections.values():
+            connection.disconnect()
+
+        if self.csv_file:
+            self.csv_file.close()
+            
         self.drawing.root.destroy()
