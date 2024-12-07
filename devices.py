@@ -160,8 +160,9 @@ class Sensor(Device):
             return value  # Возвращаем исходное значение, если произошла ошибка
 
 class Valve(Device):
-    def __init__(self, id, port, name, coord_x, coord_y):
+    def __init__(self, id, port, name, coord_x, coord_y, pin):
         super().__init__(id, port, name, coord_x, coord_y)
+        self.pin = pin # Номер пина, к которому подключен клапан
         self.status = False  # Изначально клапан закрыт
         self.shape = None
         self.label = None
@@ -190,5 +191,6 @@ class Valve(Device):
             port=json_data['port'],
             name=json_data['name'],
             coord_x=json_data['coord_x'],
-            coord_y=json_data['coord_y']
+            coord_y=json_data['coord_y'],
+            pin=json_data['pin']
         )

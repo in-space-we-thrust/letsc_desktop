@@ -12,6 +12,7 @@ def connect_to_serial_port(port, baudrate=115200):
 def send_message(ser, message):
     ser.write(message.encode())
     ser.write("\n".encode())
+    print(f"Sent message: {message}")
 
 def receive_message(connection, timeout=1):
     connection.timeout = timeout

@@ -54,19 +54,27 @@ class LabPneumoLogic:
 
     def connect_to_port(self, port):
         if port not in self.serial_connections:
-            self.serial_connections[port] = connect_to_serial_port(port, 115200)
+            connection = connect_to_serial_port(port, 115200)
+            if connection is None:
+                print(f"Warning: Could not connect to port {port}")
+            self.serial_connections[port] = connection
 
     def initialize_ui(self):
         self.drawing.initialize_ui(self.sensors, self.valves, self.lines, self.toggle_valve)
 
     def start_serial_threads(self):
-        for port in self.serial_connections:
-            thread = threading.Thread(target=self.serial_read_thread, args=(port,))
-            thread.daemon = True
-            thread.start()
+        for port, connection in self.serial_connections.items():
+            if connection is not None:  # Only start thread if connection exists
+                thread = threading.Thread(target=self.serial_read_thread, args=(port,))
+                thread.daemon = True
+                thread.start()
 
     def serial_read_thread(self, port):
         connection = self.serial_connections[port]
+        if connection is None:  # Skip if connection is not available
+            print(f"Warning: No connection available for port {port}")
+            return
+        
         while not self.stop_event.is_set():
             try:
                 received_message = receive_message(connection, timeout=1)
@@ -74,6 +82,7 @@ class LabPneumoLogic:
                     self.serial_queue.put((port, received_message))
             except Exception as e:
                 print(f"Error reading from {port}: {str(e)}")
+                time.sleep(1)  # Add delay to avoid rapid error messages
 
     def process_serial_data(self):
         try:
@@ -133,12 +142,12 @@ class LabPneumoLogic:
 
     def toggle_valve(self, valve):
         connection = self.serial_connections.get(valve.port)
-        if connection:
-            send_message(connection, json.dumps({"type": 1, "command": 17, "valve": valve.id, "result": 0}))
-            valve.toggle()
-            self.drawing.toggle_valve(valve)
-        else:
-            print(f"No connection for valve {valve.id}")
+        if connection is None:
+            print(f"Warning: No connection available for valve {valve.id} on port {valve.port}")
+            return
+        send_message(connection, json.dumps({"type": 1, "command": 17, "valve_pin": valve.pin, "result": 0}))
+        valve.toggle()
+        self.drawing.toggle_valve(valve)
 
     def on_closing(self):
         if self.csv_file:
