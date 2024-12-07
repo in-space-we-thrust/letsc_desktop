@@ -17,15 +17,15 @@
             "coord_y": 80
         },
         {
-            "id": 3,
-            "port": "COM6",
-            "name": "FS_1",
-            "units": "m/h",
+            "id": 5,
+            "port": "COM10",
+            "name": "TS_2",
+            "units": "t",
             "coord_x": 550,
             "coord_y": 80
         },
         {
-            "id": 5,
+            "id": 15,
             "port": "COM6",
             "name": "FS_2",
             "units": "m/h",
@@ -72,8 +72,9 @@
 
     "valves": [
         {
-            "id": 3,
+            "id": 1,
             "name": "V_1",
+            "pin": 22,
             "port": "COM6",
             "coord_x": 200,
             "coord_y": 100
@@ -81,6 +82,7 @@
         {
             "id": 4,
             "name": "V_2",
+            "pin": 23,
             "port": "COM8",
             "coord_x": 200,
             "coord_y": 550
