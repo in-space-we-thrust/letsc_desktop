@@ -32,10 +32,17 @@ class SerialConnection(Connection):
 
     def connect(self):
         try:
+            if self.connection:  # Если соединение уже существует
+                try:
+                    self.connection.close()  # Закрываем старое
+                except:
+                    pass
+                    
             self.connection = serial.Serial(self.port, self.baudrate)
             return True
         except Exception as e:
-            print(f"Serial connection error: {e}")
+            print(f"Serial connection error for port {self.port}: {e}")
+            self.connection = None
             return False
 
     def disconnect(self):
@@ -145,9 +152,18 @@ class MQTTConnection(Connection):
             client.reconnect()
 
 def create_connection(config):
-    conn_type = config.get('type', 'serial')
-    if conn_type == 'serial':
-        return SerialConnection(config)
-    elif conn_type == 'mqtt':
-        return MQTTConnection(config)
-    raise ValueError(f"Unknown connection type: {conn_type}")
+    try:
+        conn_type = config.get('type', 'serial')
+        if conn_type == 'serial':
+            connection = SerialConnection(config)
+        elif conn_type == 'mqtt':
+            connection = MQTTConnection(config)
+        else:
+            print(f"Unknown connection type: {conn_type}")
+            return None
+            
+        # Не пытаемся подключиться здесь, только создаем объект
+        return connection
+    except Exception as e:
+        print(f"Error creating connection with config {config}: {e}")
+        return None

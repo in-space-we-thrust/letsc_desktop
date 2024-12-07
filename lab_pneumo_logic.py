@@ -10,7 +10,12 @@ from devices import Sensor, Valve
 
 def make_connection_key(connection_config):
     """Create a unique key for a connection configuration"""
-    return json.dumps(connection_config, sort_keys=True)
+    if isinstance(connection_config, dict):
+        if connection_config['type'] == 'serial':
+            return connection_config['port']  # Используем порт как ключ для Serial
+        elif connection_config['type'] == 'mqtt':
+            return f"{connection_config['broker']}:{connection_config['port']}"  # Уникальный ключ для MQTT
+    return str(connection_config)  # Для обратной совместимости
 
 class LabPneumoLogic:
     def __init__(self, drawing):
@@ -48,15 +53,33 @@ class LabPneumoLogic:
 
     def load_sensors(self, sensors_data):
         for sensor_data in sensors_data:
+            # Создаем соединение перед созданием сенсора
+            connection_key = make_connection_key(sensor_data['connection'])
+            if connection_key not in self.connections:
+                connection = create_connection(sensor_data['connection'])
+                if connection and connection.connect():
+                    self.connections[connection_key] = connection
+                else:
+                    print(f"Warning: Could not connect using config {sensor_data['connection']}")
+                    self.connections[connection_key] = None
+
             sensor = Sensor.from_json(sensor_data)
             self.sensors[sensor.id] = sensor
-            self.connect_device(sensor)
 
     def load_valves(self, valves_data):
         for valve_data in valves_data:
+            # То же самое для клапанов
+            connection_key = make_connection_key(valve_data['connection'])
+            if connection_key not in self.connections:
+                connection = create_connection(valve_data['connection'])
+                if connection and connection.connect():
+                    self.connections[connection_key] = connection
+                else:
+                    print(f"Warning: Could not connect using config {valve_data['connection']}")
+                    self.connections[connection_key] = None
+
             valve = Valve.from_json(valve_data)
             self.valves[valve.id] = valve
-            self.connect_device(valve)
 
     def connect_device(self, device):
         connection_key = make_connection_key(device.connection)
@@ -65,6 +88,19 @@ class LabPneumoLogic:
             if connection and connection.connect():
                 self.connections[connection_key] = connection
                 return True
+        return connection_key in self.connections
+
+    def connect_device_port(self, connection_config):
+        """Create a single connection for a given port configuration"""
+        connection_key = make_connection_key(connection_config)
+        if connection_key not in self.connections:
+            connection = create_connection(connection_config)
+            if connection and connection.connect():
+                self.connections[connection_key] = connection
+                return True
+            else:
+                print(f"Warning: Could not connect to {connection_config}")
+                self.connections[connection_key] = None
         return connection_key in self.connections
 
     def connect_to_port(self, port):
@@ -78,14 +114,17 @@ class LabPneumoLogic:
         self.drawing.initialize_ui(self.sensors, self.valves, self.lines, self.toggle_valve)
 
     def start_serial_threads(self):
-        # Start a read thread for each connection
+        # Start a read thread only for successful connections
         for connection_key, connection in self.connections.items():
-            thread = threading.Thread(
-                target=self.read_messages,
-                args=(connection_key, connection)
-            )
-            thread.daemon = True
-            thread.start()
+            if connection is not None and connection.connect():  # Проверяем подключение
+                thread = threading.Thread(
+                    target=self.read_messages,
+                    args=(connection_key, connection)
+                )
+                thread.daemon = True
+                thread.start()
+            else:
+                print(f"Skipping read thread for {connection_key} - connection failed")
 
     def start_communication_threads(self):
         for conn_key, connection in self.connections.items():
@@ -97,13 +136,27 @@ class LabPneumoLogic:
             thread.start()
 
     def read_messages(self, connection_key, connection):
+        consecutive_errors = 0
         while not self.stop_event.is_set():
             try:
+                if consecutive_errors > 5:  # Если много ошибок подряд
+                    print(f"Too many errors for {connection_key}, reconnecting...")
+                    if connection.connect():  # Пробуем переподключиться
+                        consecutive_errors = 0
+                    else:
+                        time.sleep(1)
+                        continue
+
                 message = connection.read_message()
                 if message:
                     self.message_queue.put((connection_key, message))
+                    consecutive_errors = 0
+                else:
+                    time.sleep(0.01)  # Небольшая пауза если нет сообщений
+
             except Exception as e:
-                print(f"Error reading from {connection_key}: {e}")
+                print(f"Error reading from {connection_key}: {str(e)}")
+                consecutive_errors += 1
                 time.sleep(0.1)
 
     def serial_read_thread(self, port):
@@ -198,7 +251,7 @@ class LabPneumoLogic:
             return True
         except Exception as e:
             print(f"Error toggling valve {valve.id}: {e}")
-            valve.toggle()  # Revert state if failed
+            valve.toggle()
             return False
 
     def on_closing(self):
