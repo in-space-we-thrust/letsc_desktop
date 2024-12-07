@@ -5,8 +5,8 @@ def connect_to_serial_port(port, baudrate=115200):
     try:
         ser = serial.Serial(port, baudrate)
         return ser
-    except serial.SerialException as e:
-        print(f"Error: {e}")
+    except (serial.SerialException, Exception) as e:  # Handle both Serial and generic exceptions
+        print(f"Warning: Could not connect to port {port}: {e}")
         return None
 
 def send_message(ser, message):

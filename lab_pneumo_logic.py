@@ -144,10 +144,29 @@ class LabPneumoLogic:
         connection = self.serial_connections.get(valve.port)
         if connection is None:
             print(f"Warning: No connection available for valve {valve.id} on port {valve.port}")
-            return
-        send_message(connection, json.dumps({"type": 1, "command": 17, "valve_pin": valve.pin, "result": 0}))
-        valve.toggle()
-        self.drawing.toggle_valve(valve)
+            return False
+            
+        try:
+            # First toggle the valve state
+            valve.toggle()
+            
+            # Then send the command
+            command = {
+                "type": 1,
+                "command": 17,
+                "valve_pin": valve.pin,
+                "result": 0
+            }
+            send_message(connection, json.dumps(command))
+            
+            # Update UI
+            self.drawing.toggle_valve(valve)
+            return True
+        except Exception as e:
+            print(f"Error toggling valve {valve.id}: {e}")
+            # Revert valve state if command failed
+            valve.toggle()
+            return False
 
     def on_closing(self):
         if self.csv_file:

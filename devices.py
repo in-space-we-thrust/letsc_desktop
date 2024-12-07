@@ -47,32 +47,21 @@ class Sensor(Device):
         )
 
     def process_signal(self, raw_value):
+        value = raw_value
+
         # 1. Тарировка (смещение)
         offset = self.processing.get('offset', 0)
-        if offset:
-            value = self.compensate_offset(raw_value, offset)
-        else:
-            value = raw_value
+        value = self.compensate_offset(value, offset)
 
-        # 2. Применение калибровочной таблицы
-        if self.processing.get('calibration_table', {}).get('enabled', False):
-            value = self.apply_calibration_table(value)
-
-        # 3. Калибровка
+        # 2. Калибровка - применяется после смещения
         calibration_factor = self.processing.get('calibration_factor', 1.0)
         value = self.calibrate_signal(value, calibration_factor)
 
-        # 4. Удаление выбросов
-        if self.processing.get('outlier_detection', {}).get('enabled', False):
-            threshold = self.processing['outlier_detection']['threshold']
-            value = self.detect_outliers(value, threshold)
+        # 3. Применение калибровочной таблицы
+        if self.processing.get('calibration_table', {}).get('enabled', False):
+            value = self.apply_calibration_table(value)
 
-        # 5. Температурная компенсация
-        if self.processing.get('temperature_compensation', {}).get('enabled', False):
-            compensation_factor = self.processing['temperature_compensation']['compensation_factor']
-            value = self.compensate_temperature(value, compensation_factor)
-
-        # 6. Фильтрация
+        # 4. Фильтрация
         filters = self.processing.get('filters', {})
         if 'moving_average' in filters:
             window_size = filters['moving_average']
@@ -80,6 +69,16 @@ class Sensor(Device):
         if 'kalman' in filters:
             kalman_config = filters['kalman']
             value = self.apply_kalman_filter(value, kalman_config)
+
+        # 5. Удаление выбросов
+        if self.processing.get('outlier_detection', {}).get('enabled', False):
+            threshold = self.processing['outlier_detection']['threshold']
+            value = self.detect_outliers(value, threshold)
+
+        # 6. Температурная компенсация
+        if self.processing.get('temperature_compensation', {}).get('enabled', False):
+            compensation_factor = self.processing['temperature_compensation']['compensation_factor']
+            value = self.compensate_temperature(value, compensation_factor)
 
         # 7. Выполнение произвольного кода обработки
         if 'custom_processing' in self.processing:
