@@ -108,7 +108,7 @@
                 "type": "serial",
                 "port": "COM6"
             },
-            "coord_x": 750,
+            "coord_x": 600,
             "coord_y": 100,
             "default_status": true
         },
@@ -134,7 +134,7 @@
                 "port": "COM8",
                 "baudrate": 115200
             },
-            "coord_x": 750,
+            "coord_x": 600,
             "coord_y": 550,
             "default_status": true
         }
@@ -169,39 +169,39 @@
         {
             "start_x": 150,
             "start_y": 100,
-            "end_x": 650,
+            "end_x": 500,
             "end_y": 100,
             "width": 2,
             "comment": "1st to tank1"
         },
         {
-            "start_x": 650,
+            "start_x": 500,
             "start_y": 100,
-            "end_x": 650,
+            "end_x": 500,
             "end_y": 125,
             "width": 2,
             "comment": "vert to tank1"
         },
         {
-            "start_x": 650,
+            "start_x": 500,
             "start_y": 225,
-            "end_x": 650,
+            "end_x": 500,
             "end_y": 250,
             "width": 2,
             "comment": "small1 from tank1"
         },
         {
-            "start_x": 650,
+            "start_x": 500,
             "start_y": 250,
-            "end_x": 700,
+            "end_x": 550,
             "end_y": 250,
             "width": 2,
             "comment": "small2 from tank1"
         },
         {
-            "start_x": 700,
+            "start_x": 550,
             "start_y": 250,
-            "end_x": 700,
+            "end_x": 550,
             "end_y": 100,
             "width": 2,
             "comment": "small3 from tank1"
@@ -209,45 +209,45 @@
         {
             "start_x": 150,
             "start_y": 550,
-            "end_x": 650,
+            "end_x": 500,
             "end_y": 550,
             "width": 2,
             "comment": "4th to tank2"
         },
         {
-            "start_x": 650,
+            "start_x": 500,
             "start_y": 550,
-            "end_x": 650,
+            "end_x": 500,
             "end_y": 575,
             "width": 2,
             "comment": "vert to tank2"
         },
         {
-            "start_x": 650,
+            "start_x": 500,
             "start_y": 675,
-            "end_x": 650,
+            "end_x": 500,
             "end_y": 700,
             "width": 2,
             "comment": "small1 from tank2"
         },
         {
-            "start_x": 650,
+            "start_x": 500,
             "start_y": 700,
-            "end_x": 700,
+            "end_x": 550,
             "end_y": 700,
             "width": 2,
             "comment": "small2 from tank2"
         },
         {
-            "start_x": 700,
+            "start_x": 550,
             "start_y": 700,
-            "end_x": 700,
+            "end_x": 550,
             "end_y": 550,
             "width": 2,
             "comment": "small3 from tank2"
         },
         {
-            "start_x": 700,
+            "start_x": 550,
             "start_y": 100,
             "end_x": 1000,
             "end_y": 100,
@@ -287,7 +287,7 @@
             "comment": "vert from 4th to engine"
         },
         {
-            "start_x": 700,
+            "start_x": 550,
             "start_y": 550,
             "end_x": 1000,
             "end_y": 550,

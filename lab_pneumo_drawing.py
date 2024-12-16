@@ -101,8 +101,8 @@ class TkinterDrawing(DrawingStrategy):
 
     def draw_tanks(self):
         self.draw_tank(50, 500, 50, 100, 0.2)
-        self.draw_tank(650, 175, 50, 100, 0.2, 'red')
-        self.draw_tank(650, 625, 50, 100, 0.2, 'blue')
+        self.draw_tank(500, 175, 50, 100, 0.2, 'red')    # Было 650
+        self.draw_tank(500, 625, 50, 100, 0.2, 'blue')   # Было 650
 
     def draw_combustion_chamber(self):
         self.draw_combustion_chamber_shape(1050, 325, 30, 52, 20, 40, 80, "right")
