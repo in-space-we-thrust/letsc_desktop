@@ -97,7 +97,8 @@
                 "port": "COM6"
             },
             "coord_x": 200,
-            "coord_y": 100
+            "coord_y": 100,
+            "default_status": false
         },
         {
             "id": 4,
@@ -109,7 +110,8 @@
                 "baudrate": 115200
             },
             "coord_x": 200,
-            "coord_y": 550
+            "coord_y": 550,
+            "default_status": true
         }
     ],
 

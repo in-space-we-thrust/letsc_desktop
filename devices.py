@@ -159,16 +159,26 @@ class Sensor(Device):
             return value  # Возвращаем исходное значение, если произошла ошибка
 
 class Valve(Device):
-    def __init__(self, id, connection, name, coord_x, coord_y, pin):
+    def __init__(self, id, connection, name, coord_x, coord_y, pin, default_status=False):
         super().__init__(id, connection, name, coord_x, coord_y)
-        self.pin = pin # Номер пина, к которому подключен клапан
-        self.status = False  # Изначально клапан закрыт
+        self.pin = pin
+        self.status = default_status
         self.shape = None
         self.label = None
         self.button = None
+        self.name_text = None
 
-    def __str__(self):
-        return f"Valve {self.id}: {self.name}"
+    @classmethod
+    def from_json(cls, json_data):
+        return cls(
+            id=json_data['id'],
+            connection=json_data['connection'],
+            name=json_data['name'],
+            coord_x=json_data['coord_x'],
+            coord_y=json_data['coord_y'],
+            pin=json_data['pin'],
+            default_status=json_data.get('default_status', False)
+        )
 
     def toggle(self):
         self.status = not self.status
@@ -180,16 +190,4 @@ class Valve(Device):
         self.status = False
 
     def send_command(self):
-        # Здесь вы можете реализовать отправку команды на управление клапаном через последовательный порт
         pass
-
-    @classmethod
-    def from_json(cls, json_data):
-        return cls(
-            id=json_data['id'],
-            connection=json_data['connection'],  # Changed from port to connection
-            name=json_data['name'],
-            coord_x=json_data['coord_x'],
-            coord_y=json_data['coord_y'],
-            pin=json_data['pin']
-        )

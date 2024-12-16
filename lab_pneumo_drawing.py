@@ -142,9 +142,19 @@ class TkinterDrawing(DrawingStrategy):
         )
 
     def draw_valve(self, valve):
-        vertices = [(valve.coord_x-7, valve.coord_y - 10), (valve.coord_x + 7, valve.coord_y), (valve.coord_x - 7, valve.coord_y + 10)]
-        valve.shape = self.canvas.create_polygon(vertices, fill='green', outline='black')
-        valve.label = self.canvas.create_text(valve.coord_x-7, valve.coord_y+25, text="ON", fill='green')
+        vertices = [(valve.coord_x-7, valve.coord_y - 10), 
+                    (valve.coord_x + 7, valve.coord_y), 
+                    (valve.coord_x - 7, valve.coord_y + 10)]
+        valve.shape = self.canvas.create_polygon(vertices, 
+                                               fill='green' if valve.status else 'red', 
+                                               outline='black')
+        valve.label = self.canvas.create_text(valve.coord_x-7, valve.coord_y+25, 
+                                            text="ON" if valve.status else "OFF", 
+                                            fill='green' if valve.status else 'red')
+        # Add valve name display
+        valve.name_text = self.canvas.create_text(valve.coord_x-7, valve.coord_y-25,
+                                                text=valve.name,
+                                                fill='black')
 
     def draw_tank(self, center_x, center_y, thickness, height, curvature, fill='lightblue'):
         x1 = center_x - thickness / 2
