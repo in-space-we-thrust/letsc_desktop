@@ -57,7 +57,7 @@ class SerialConnection(Connection):
     def is_connected(self):
         """Неблокирующая проверка соединения"""
         try:
-            # Пытаемся переподключиться, если с��единение потеряно
+            # Пытаемся переподключиться, если соединение потеряно
             if self.connection is None:
                 return self.connect()
             
@@ -110,6 +110,7 @@ class MQTTConnection(Connection):
         self.connected = Event()
         self.last_message_time = 0
         self.message_rate_limit = 0.05  # 50ms между сообщениями
+        self.connection_timeout = 5.0  # Увеличиваем таймаут подключения
 
         # Оптимизация MQTT клиента
         self.client.on_message = self._on_message
@@ -123,14 +124,26 @@ class MQTTConnection(Connection):
 
     def connect(self):
         try:
-            # Оптимизация параметров подключения
-            self.client.connect_async(self.broker, self.port, keepalive=60)
+            self.connected.clear()  # Сбрасываем флаг подключения
+            print(f"Connecting to MQTT broker {self.broker}...")
+            
+            # Используем синхронное подключение вместо асинхронного
+            self.client.connect(self.broker, self.port, keepalive=60)
             self.client.subscribe(self.topic, qos=0)
-            self.client.socket_timeout = 1
             self.client.loop_start()
-            return self.connected.wait(timeout=2.0)
+            
+            # Ждём подключения с таймаутом
+            if not self.connected.wait(timeout=self.connection_timeout):
+                print("MQTT connection timeout")
+                self.client.loop_stop()
+                return False
+                
+            print("MQTT connected successfully")
+            return True
+            
         except Exception as e:
             print(f"MQTT connection error: {e}")
+            self.client.loop_stop()
             return False
 
     def disconnect(self):
@@ -163,9 +176,19 @@ class MQTTConnection(Connection):
 
     def _on_connect(self, client, userdata, flags, rc):
         if rc == 0:
+            print("MQTT: Connected with result code", rc)
             self.connected.set()
         else:
-            print(f"MQTT Connection failed with code {rc}")
+            print(f"MQTT: Connection failed with result code {rc}")
+            # Добавляем расшифровку кода ошибки
+            error_messages = {
+                1: "Connection refused - incorrect protocol version",
+                2: "Connection refused - invalid client identifier",
+                3: "Connection refused - server unavailable",
+                4: "Connection refused - bad username or password",
+                5: "Connection refused - not authorized"
+            }
+            print(f"Error details: {error_messages.get(rc, 'Unknown error')}")
 
     def _on_message(self, client, userdata, msg):
         try:
@@ -192,7 +215,7 @@ def create_connection(config):
             print(f"Unknown connection type: {conn_type}")
             return None
             
-        # Не пытаемся подключиться здесь, только создаем объект
+        # Не пытаемся подклю��иться здесь, только создаем объект
         return connection
     except Exception as e:
         print(f"Error creating connection with config {config}: {e}")

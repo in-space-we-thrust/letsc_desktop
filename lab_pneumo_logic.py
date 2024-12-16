@@ -5,7 +5,7 @@ import json
 import os
 import csv
 from datetime import datetime
-from communication import create_connection  # Remove old imports, just use create_connection
+from communication import create_connection, SerialConnection, MQTTConnection  # Add MQTTConnection
 from devices import Sensor, Valve
 
 def make_connection_key(connection_config):
@@ -61,14 +61,14 @@ class LabPneumoLogic:
 
     def load_sensors(self, sensors_data):
         for sensor_data in sensors_data:
-            # Создаем соединение перед созданием сенсора
             connection_key = make_connection_key(sensor_data['connection'])
             if connection_key not in self.connections:
                 connection = create_connection(sensor_data['connection'])
-                if connection and connection.connect():
+                if connection:  # Remove the connect() check here - let it happen asynchronously
                     self.connections[connection_key] = connection
+                    print(f"Created connection for {connection_key}")
                 else:
-                    print(f"Warning: Could not connect using config {sensor_data['connection']}")
+                    print(f"Warning: Could not create connection object for {connection_key}")
                     self.connections[connection_key] = None
 
             sensor = Sensor.from_json(sensor_data)
@@ -124,7 +124,13 @@ class LabPneumoLogic:
     def start_serial_threads(self):
         # Start a read thread only for successful connections
         for connection_key, connection in self.connections.items():
-            if connection is not None and connection.connect():  # Проверяем подключение
+            if connection is None:
+                print(f"Skipping read thread for {connection_key} - no connection object")
+                continue
+                
+            # Skip connection check for MQTT as it connects asynchronously
+            if isinstance(connection, MQTTConnection) or \
+               (isinstance(connection, SerialConnection) and connection.is_connected()):
                 thread = threading.Thread(
                     target=self.read_messages,
                     args=(connection_key, connection)
