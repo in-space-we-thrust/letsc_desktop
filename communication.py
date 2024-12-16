@@ -30,8 +30,8 @@ class SerialConnection(Connection):
         self.baudrate = config.get('baudrate', 115200)
         self.connection = None
         self.lock = Lock()
-        self.write_timeout = 0.1  # Добавляем таймаут для записи
-        self.read_timeout = 0.1   # Добавляем таймаут для чтения
+        self.write_timeout = 0.05  # Уменьшаем таймаут для более быстрой реакции
+        self.read_timeout = 0.05   # Добавляем таймаут для чтения
 
     def connect(self):
         try:

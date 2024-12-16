@@ -32,6 +32,10 @@ class LabPneumoLogic:
         self.start_time = time.time()
         self.connections = {}  # Dictionary to store all connections
         self.message_queue = queue.Queue()  # Single queue for all messages
+        self.command_queue = queue.Queue()  # Add command queue
+        self.command_thread = threading.Thread(target=self.process_commands)
+        self.command_thread.daemon = True
+        self.command_thread.start()
 
         self.load_config_and_connect()
         self.initialize_ui()
@@ -239,36 +243,45 @@ class LabPneumoLogic:
         connection_key = make_connection_key(valve.connection)
         connection = self.connections.get(connection_key)
         
-        # Обновленная проверка соединения
-        if not connection:
+        if not connection or not hasattr(connection, 'is_connected') or not connection.is_connected():
             print(f"Warning: No connection object for valve {valve.id}")
             self.drawing.update_valve_error(valve)
             return False
-            
-        if not connection.is_connected():
-            print(f"Warning: Connection lost for valve {valve.id}, attempting to reconnect...")
-            if not connection.connect():
-                self.drawing.update_valve_error(valve)
-                return False
         
-        try:
-            command = {
-                "type": 1,
-                "command": 17,
-                "valve_pin": valve.pin,
-                "result": 0
-            }
-            if connection.send_message(json.dumps(command)):
-                valve.toggle()
-                self.drawing.toggle_valve(valve)
-                return True
-            else:
-                self.drawing.update_valve_error(valve)
-                return False
-        except Exception as e:
-            print(f"Error toggling valve {valve.id}: {e}")
-            self.drawing.update_valve_error(valve)
-            return False
+        # Prepare command
+        command = {
+            "type": 1,
+            "command": 17,
+            "valve_pin": valve.pin,
+            "result": 0
+        }
+        
+        # Toggle valve state immediately in GUI
+        valve.toggle()
+        self.drawing.toggle_valve(valve)
+        
+        # Put command in queue for async processing
+        self.command_queue.put((valve, connection, command))
+        return True
+
+    def process_commands(self):
+        """Обработка команд в отдельном потоке"""
+        while not self.stop_event.is_set():
+            try:
+                command_data = self.command_queue.get(timeout=0.1)
+                if command_data:
+                    valve, connection, command = command_data
+                    try:
+                        if connection.send_message(json.dumps(command)):
+                            # Используем after для обновления GUI в основном потоке
+                            self.drawing.root.after(0, self.drawing.toggle_valve, valve)
+                        else:
+                            self.drawing.root.after(0, self.drawing.update_valve_error, valve)
+                    except Exception as e:
+                        print(f"Command processing error: {e}")
+                        self.drawing.root.after(0, self.drawing.update_valve_error, valve)
+            except queue.Empty:
+                continue
 
     def initialize_all_connections(self):
         """Инициализация всех подключений в отдельном потоке"""
