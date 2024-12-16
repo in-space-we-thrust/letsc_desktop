@@ -85,8 +85,12 @@ class TkinterDrawing(DrawingStrategy):
     def initialize_valves(self, valves, toggle_valve_callback):
         for valve in valves.values():
             self.draw_valve(valve)
-            valve.button = tk.Button(self.root, text="Toggle Valve", 
-                                     command=lambda v=valve: toggle_valve_callback(v))
+            # Используем lambda в комбинации с after для неблокирующего вызова
+            valve.button = tk.Button(
+                self.root, 
+                text="Toggle Valve", 
+                command=lambda v=valve: self.root.after(0, toggle_valve_callback, v)
+            )
             valve.button.place(x=valve.coord_x - 15, y=valve.coord_y + 44)
 
     def initialize_lines(self, lines):
@@ -355,3 +359,15 @@ class TkinterDrawing(DrawingStrategy):
             graph_data['data_index'] = (idx + 1) % MAX_POINTS
             if idx + 1 >= MAX_POINTS:
                 graph_data['data_filled'] = True
+
+    def update_valve_error(self, valve):
+        # Показываем ошибку, мигая красным цветом
+        def flash_error():
+            self.canvas.itemconfig(valve.shape, fill='red')
+            self.canvas.itemconfig(valve.label, fill='red')
+            self.root.after(200, lambda: self.canvas.itemconfig(valve.shape, 
+                                                              fill='gray'))
+            self.root.after(200, lambda: self.canvas.itemconfig(valve.label, 
+                                                              fill='black'))
+        
+        flash_error()

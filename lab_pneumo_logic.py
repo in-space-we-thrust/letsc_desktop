@@ -41,6 +41,10 @@ class LabPneumoLogic:
         self.drawing.root.after(100, self.process_serial_data)
         self.drawing.root.after(100, self.update_sensor_values_from_queue)
 
+        self.initialize_connections_thread = threading.Thread(target=self.initialize_all_connections)
+        self.initialize_connections_thread.daemon = True
+        self.initialize_connections_thread.start()
+
     def load_config_and_connect(self):
         config = self.load_config(os.path.dirname(os.path.abspath(__file__)) + '/config.json')
         self.load_sensors(config['sensors'])
@@ -234,25 +238,65 @@ class LabPneumoLogic:
     def toggle_valve(self, valve):
         connection_key = make_connection_key(valve.connection)
         connection = self.connections.get(connection_key)
-        if connection is None:
-            print(f"Warning: No connection available for valve {valve.id}")
+        
+        # Обновленная проверка соединения
+        if not connection:
+            print(f"Warning: No connection object for valve {valve.id}")
+            self.drawing.update_valve_error(valve)
             return False
             
+        if not connection.is_connected():
+            print(f"Warning: Connection lost for valve {valve.id}, attempting to reconnect...")
+            if not connection.connect():
+                self.drawing.update_valve_error(valve)
+                return False
+        
         try:
-            valve.toggle()
             command = {
                 "type": 1,
                 "command": 17,
                 "valve_pin": valve.pin,
                 "result": 0
             }
-            connection.send_message(json.dumps(command))
-            self.drawing.toggle_valve(valve)
-            return True
+            if connection.send_message(json.dumps(command)):
+                valve.toggle()
+                self.drawing.toggle_valve(valve)
+                return True
+            else:
+                self.drawing.update_valve_error(valve)
+                return False
         except Exception as e:
             print(f"Error toggling valve {valve.id}: {e}")
-            valve.toggle()
+            self.drawing.update_valve_error(valve)
             return False
+
+    def initialize_all_connections(self):
+        """Инициализация всех подключений в отдельном потоке"""
+        # Собираем все уникальные конфигурации подключений
+        connection_configs = {}
+        
+        # Из сенсоров
+        for sensor in self.sensors.values():
+            key = make_connection_key(sensor.connection)
+            if key not in connection_configs:
+                connection_configs[key] = sensor.connection
+
+        # Из клапанов
+        for valve in self.valves.values():
+            key = make_connection_key(valve.connection)
+            if key not in connection_configs:
+                connection_configs[key] = valve.connection
+
+        # Инициализируем все подключения
+        for key, config in connection_configs.items():
+            if key not in self.connections:
+                connection = create_connection(config)
+                if connection and connection.connect():
+                    self.connections[key] = connection
+                    print(f"Successfully connected to {key}")
+                else:
+                    print(f"Failed to connect to {key}")
+                    self.connections[key] = None
 
     def on_closing(self):
         self.stop_event.set()

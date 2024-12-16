@@ -1,5 +1,6 @@
 import json
 import serial
+import serial.serialutil
 import paho.mqtt.client as mqtt
 from abc import ABC, abstractmethod
 from queue import Queue, Full
@@ -29,6 +30,8 @@ class SerialConnection(Connection):
         self.baudrate = config.get('baudrate', 115200)
         self.connection = None
         self.lock = Lock()
+        self.write_timeout = 0.1  # Добавляем таймаут для записи
+        self.read_timeout = 0.1   # Добавляем таймаут для чтения
 
     def connect(self):
         try:
@@ -38,11 +41,31 @@ class SerialConnection(Connection):
                 except:
                     pass
                     
-            self.connection = serial.Serial(self.port, self.baudrate)
+            self.connection = serial.Serial(
+                port=self.port,
+                baudrate=self.baudrate,
+                timeout=self.read_timeout,
+                write_timeout=self.write_timeout
+            )
             return True
         except Exception as e:
             print(f"Serial connection error for port {self.port}: {e}")
             self.connection = None
+            return False
+
+    def is_connected(self):
+        """Неблокирующая проверка соединения"""
+        try:
+            # Пытаемся переподключиться, если соединение потеряно
+            if self.connection is None:
+                return self.connect()
+            
+            if not self.connection.is_open:
+                self.connection.open()
+            
+            return True
+        except Exception as e:
+            print(f"Connection check error for {self.port}: {e}")
             return False
 
     def disconnect(self):
@@ -50,24 +73,30 @@ class SerialConnection(Connection):
             self.connection.close()
 
     def send_message(self, message):
-        with self.lock:
-            if self.connection:
-                try:
-                    self.connection.write(message.encode())
-                    self.connection.write(b'\n')
-                    return True
-                except Exception as e:
-                    print(f"Serial send error: {e}")
-        return False
+        if not self.is_connected():
+            return False
+            
+        try:
+            with self.lock:
+                self.connection.write(message.encode())
+                self.connection.write(b'\n')
+                return True
+        except serial.serialutil.SerialTimeoutException:
+            print(f"Serial write timeout on port {self.port}")
+            return False
+        except Exception as e:
+            print(f"Serial send error: {e}")
+            return False
 
     def read_message(self):
-        with self.lock:
-            if self.connection:
-                try:
-                    return self.connection.readline().decode().strip()
-                except Exception:
-                    return None
-        return None
+        if not self.is_connected():
+            return None
+            
+        try:
+            with self.lock:
+                return self.connection.readline().decode().strip()
+        except:
+            return None
 
 class MQTTConnection(Connection):
     def __init__(self, config):
