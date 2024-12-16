@@ -36,6 +36,7 @@ class LabPneumoLogic:
         self.command_thread = threading.Thread(target=self.process_commands)
         self.command_thread.daemon = True
         self.command_thread.start()
+        self.mqtt_topics = {}  # Добавляем словарь для отслеживания MQTT топиков
 
         self.load_config_and_connect()
         self.initialize_ui()
@@ -62,6 +63,13 @@ class LabPneumoLogic:
     def load_sensors(self, sensors_data):
         for sensor_data in sensors_data:
             connection_key = make_connection_key(sensor_data['connection'])
+            
+            # Особая обработка для MQTT сенсоров
+            if sensor_data['connection']['type'] == 'mqtt':
+                topic = sensor_data['connection']['topic']
+                self.mqtt_topics[topic] = sensor_data['id']
+                print(f"Registered MQTT topic {topic} for sensor {sensor_data['id']}")
+
             if connection_key not in self.connections:
                 connection = create_connection(sensor_data['connection'])
                 if connection:  # Remove the connect() check here - let it happen asynchronously
@@ -191,19 +199,49 @@ class LabPneumoLogic:
     def process_serial_data(self):
         try:
             while not self.message_queue.empty():
-                connection_key, message = self.message_queue.get_nowait()
                 try:
-                    parsed_message = json.loads(message)
-                    if parsed_message and parsed_message.get('sensor_id'):
-                        sensor_id = parsed_message['sensor_id']
-                        value = parsed_message['value']
-                        self.sensor_data_queue.put({sensor_id: value})
-                    else:
-                        print(f"Received command from {connection_key}: {message}")
-                except json.JSONDecodeError:
-                    print(f"Invalid JSON message from {connection_key}: {message}")
+                    connection_key, message = self.message_queue.get_nowait()
+                    
+                    # Проверяем, является ли connection_key MQTT топиком
+                    if 'mqtt' in str(connection_key).lower():  # Изменено условие проверки
+                        # Ищем сенсор по топику
+                        for sensor in self.sensors.values():
+                            if (sensor.connection['type'] == 'mqtt' and 
+                                sensor.connection['topic'] == message[0]):  # Распаковываем кортеж (topic, message)
+                                try:
+                                    value = float(message[1])  # Берем значение из кортежа
+                                    self.sensor_data_queue.put({sensor.id: value})
+                                    print(f"MQTT data received for sensor {sensor.id}: {value}")
+                                except ValueError:
+                                    print(f"Invalid MQTT message format: {message}")
+                        continue
+
+                    # Обработка обычных JSON сообщений
+                    try:
+                        parsed_message = json.loads(message)
+                        if parsed_message and parsed_message.get('sensor_id'):
+                            sensor_id = parsed_message['sensor_id']
+                            value = parsed_message['value']
+                            self.sensor_data_queue.put({sensor_id: value})
+                        else:
+                            print(f"Received command from {connection_key}: {message}")
+                    except json.JSONDecodeError:
+                        print(f"Invalid JSON message from {connection_key}: {message}")
+                    
+                except Exception as e:
+                    print(f"Error processing message: {e}, key: {connection_key}, message: {message}")
+        except Exception as e:
+            print(f"Error in process_serial_data: {e}")
         finally:
             self.drawing.root.after(100, self.process_serial_data)
+
+    def get_sensor_id_by_mqtt_key(self, connection_key):
+        """Получаем ID сенсора по ключу MQTT подключения"""
+        for sensor in self.sensors.values():
+            if (sensor.connection['type'] == 'mqtt' and 
+                make_connection_key(sensor.connection) == connection_key):
+                return sensor.id
+        return None
 
     def update_sensor_values_from_queue(self):
         try:
