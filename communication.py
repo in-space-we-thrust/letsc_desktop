@@ -2,6 +2,7 @@ import json
 import serial
 import serial.serialutil
 import paho.mqtt.client as mqtt
+import time  # Add this import
 from abc import ABC, abstractmethod
 from queue import Queue, Full
 from collections import deque
@@ -56,7 +57,7 @@ class SerialConnection(Connection):
     def is_connected(self):
         """Неблокирующая проверка соединения"""
         try:
-            # Пытаемся переподключиться, если соединение потеряно
+            # Пытаемся переподключиться, если с��единение потеряно
             if self.connection is None:
                 return self.connect()
             

@@ -13,12 +13,12 @@
             "coord_y": 80
         },
         {
-            "id": 17,
+            "id": 5,
             "connection": {
                 "type": "mqtt",
                 "broker": "localhost",
                 "port": 1883,
-                "topic": "sensors/temperature/1"
+                "topic": "commutator/sensors/1"
             },
             "name": "TS_1",
             "units": "°C",
@@ -26,7 +26,7 @@
             "coord_y": 80
         },
         {
-            "id": 5,
+            "id": 25,
             "connection": {
                 "type": "serial",
                 "port": "COM10",

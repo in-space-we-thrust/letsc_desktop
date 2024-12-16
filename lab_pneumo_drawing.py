@@ -45,6 +45,8 @@ class TkinterDrawing(DrawingStrategy):
         self.update_counter = 0
         plt.style.use('fast')  # Используем быстрый стиль для matplotlib
         self.animation_running = {}  # Добавляем флаг для отслеживания анимации
+        self.sensor_timeouts = {}  # Добавляем словарь для отслеживания последних обновлений
+        self.SENSOR_TIMEOUT = 5.0  # Таймаут в секундах
 
     def initialize_ui(self, sensors, valves, lines, toggle_valve_callback):
         self.draw_grid(self.canvas_width, self.canvas_height)
@@ -53,6 +55,7 @@ class TkinterDrawing(DrawingStrategy):
         self.initialize_lines(lines)
         self.draw_tanks()
         self.draw_combustion_chamber()
+        self.root.after(1000, self.check_sensor_timeouts)  # Запускаем проверку таймаутов
 
     def run(self):
         self.root.mainloop()
@@ -144,6 +147,7 @@ class TkinterDrawing(DrawingStrategy):
             fill='black',
             tags=sensor_tag
         )
+        self.sensor_timeouts[sensor.id] = time.time()  # Инициализируем время последнего обновления
 
     def draw_valve(self, valve):
         vertices = [(valve.coord_x-7, valve.coord_y - 10), 
@@ -202,8 +206,10 @@ class TkinterDrawing(DrawingStrategy):
         self.canvas.create_polygon(bell_curve_points, fill="gray")
 
     def update_sensor(self, sensor):
-        # Update sensor display
+        current_time = time.time()
+        self.sensor_timeouts[sensor.id] = current_time
         self.canvas.itemconfig(sensor.text, text=f"{sensor.value}")
+        self.canvas.itemconfig(sensor.rectangle, outline='green')  # Восстанавливаем зеленый цвет
 
     def toggle_valve(self, valve):
         new_color = 'green' if valve.status else 'red'
@@ -371,3 +377,15 @@ class TkinterDrawing(DrawingStrategy):
                                                               fill='black'))
         
         flash_error()
+
+    def check_sensor_timeouts(self):
+        """Проверяем таймауты сенсоров"""
+        current_time = time.time()
+        for sensor_id, last_update in self.sensor_timeouts.items():
+            if current_time - last_update > self.SENSOR_TIMEOUT:
+                sensor = self.sensors.get(sensor_id)
+                if sensor:
+                    self.canvas.itemconfig(sensor.rectangle, outline='black')
+        
+        # Планируем следующую проверку
+        self.root.after(1000, self.check_sensor_timeouts)
