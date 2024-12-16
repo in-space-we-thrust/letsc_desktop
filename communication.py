@@ -105,13 +105,13 @@ class MQTTConnection(Connection):
         self.port = config.get('port', 1883)
         self.topic = config['topic']
         print(f"MQTT: Initializing connection for topic: {self.topic}")  # Добавляем отладку
-        self.client = mqtt.Client(protocol=mqtt.MQTTv311)  # Явно указываем протокол
+        self.client = mqtt.Client(protocol=mqtt.MQTTv311, client_id="letsc_desktop_" + str(time.time()))  # Явно указываем протокол
         self.message_buffer = deque(maxlen=50)  # Уменьшаем размер буфера
         self.buffer_lock = Lock()
         self.connected = Event()
         self.last_message_time = 0
         self.message_rate_limit = 0.05  # 50ms между сообщениями
-        self.connection_timeout = 5.0  # Увеличиваем таймаут подключения
+        self.connection_timeout = 0.05  # Увеличиваем таймаут для первого подключения
 
         # Оптимизация MQTT клиента
         self.client.on_message = self._on_message
@@ -125,23 +125,32 @@ class MQTTConnection(Connection):
 
     def connect(self):
         try:
+            if self.connected.is_set():
+                print(f"MQTT: Already connected to {self.broker}")
+                return True
+                
             self.connected.clear()
             print(f"MQTT: Connecting to broker {self.broker}...")
             
-            # Устанавливаем максимальный уровень отладки
-            self.client.enable_logger()
+            # Очищаем буфер перед новым подключением
+            with self.buffer_lock:
+                self.message_buffer.clear()
             
-            self.client.connect(self.broker, self.port, keepalive=60)
-            print(f"MQTT: Subscribing to topic: {self.topic}")
-            self.client.subscribe(self.topic, qos=0)
+            connect_result = self.client.connect(self.broker, self.port, keepalive=60)
+            if connect_result != 0:
+                print(f"MQTT: Connection failed with code {connect_result}")
+                return False
+
             self.client.loop_start()
+            print("MQTT: Loop started")
             
+            # Ждем подключения
             if not self.connected.wait(timeout=self.connection_timeout):
                 print("MQTT: Connection timeout")
                 self.client.loop_stop()
                 return False
-            
-            print(f"MQTT: Successfully connected and subscribed to {self.topic}")
+
+            print(f"MQTT: Successfully connected to {self.broker}:{self.port}")
             return True
             
         except Exception as e:
@@ -164,21 +173,30 @@ class MQTTConnection(Connection):
         return False
 
     def read_message(self):
+        print("MQTT read_message called")  # Отладка
         current_time = time.time()
         if current_time - self.last_message_time < self.message_rate_limit:
+            print("MQTT: Rate limit active")  # Отладка
             return None
 
         with self.buffer_lock:
             try:
+                if not self.connected.is_set():
+                    print("MQTT: Not connected")  # Отладка
+                    return None
+                    
                 if len(self.message_buffer) > 0:
-                    print(f"Buffer size: {len(self.message_buffer)}")
-                message = self.message_buffer.popleft() if self.message_buffer else None
-                if message:
-                    self.last_message_time = current_time
-                    print(f"Reading message from buffer: {message}")
-                return message
+                    print(f"MQTT buffer size: {len(self.message_buffer)}")
+                    message = self.message_buffer.popleft() if self.message_buffer else None
+                    if message:
+                        self.last_message_time = current_time
+                        print(f"MQTT reading message: {message}")
+                        return message
+                    
+                print("MQTT: Buffer empty")  # Отладка
+                return None
             except Exception as e:
-                print(f"Error reading from buffer: {e}")
+                print(f"Error reading from MQTT buffer: {e}")
                 return None
 
     def _on_connect(self, client, userdata, flags, rc):
@@ -201,12 +219,13 @@ class MQTTConnection(Connection):
         try:
             with self.buffer_lock:
                 decoded_message = msg.payload.decode()
-                print(f"MQTT received on {msg.topic}: {decoded_message}")
+                print(f"MQTT received raw: {decoded_message}")
                 if len(self.message_buffer) < self.message_buffer.maxlen:
-                    self.message_buffer.append((msg.topic, decoded_message))
-                    print(f"Added message to buffer. Buffer size: {len(self.message_buffer)}")
+                    message_tuple = (msg.topic, decoded_message)
+                    self.message_buffer.append(message_tuple)
+                    print(f"Added to MQTT buffer: {message_tuple}")
                 else:
-                    print("Buffer full, dropping message")
+                    print("MQTT buffer full, dropping message")
         except Exception as e:
             print(f"Error in MQTT message handling: {e}")
 

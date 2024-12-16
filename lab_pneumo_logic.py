@@ -39,16 +39,17 @@ class LabPneumoLogic:
         self.mqtt_topics = {}  # Добавляем словарь для отслеживания MQTT топиков
 
         self.load_config_and_connect()
+        self.initialize_connections_thread = threading.Thread(target=self.initialize_all_connections)
+        self.initialize_connections_thread.daemon = True
+        self.initialize_connections_thread.start()
+        self.initialize_connections_thread.join(timeout=5.0)
+
         self.initialize_ui()
         self.start_serial_threads()
         self.initialize_csv_logging()
 
         self.drawing.root.after(100, self.process_serial_data)
         self.drawing.root.after(100, self.update_sensor_values_from_queue)
-
-        self.initialize_connections_thread = threading.Thread(target=self.initialize_all_connections)
-        self.initialize_connections_thread.daemon = True
-        self.initialize_connections_thread.start()
 
     def load_config_and_connect(self):
         config = self.load_config(os.path.dirname(os.path.abspath(__file__)) + '/config.json')
@@ -130,23 +131,28 @@ class LabPneumoLogic:
         self.drawing.initialize_ui(self.sensors, self.valves, self.lines, self.toggle_valve)
 
     def start_serial_threads(self):
-        # Start a read thread only for successful connections
+        print("Starting communication threads...")
         for connection_key, connection in self.connections.items():
             if connection is None:
-                print(f"Skipping read thread for {connection_key} - no connection object")
+                print(f"Skipping thread for {connection_key} - no connection object")
                 continue
-                
-            # Skip connection check for MQTT as it connects asynchronously
-            if isinstance(connection, MQTTConnection) or \
-               (isinstance(connection, SerialConnection) and connection.is_connected()):
-                thread = threading.Thread(
-                    target=self.read_messages,
-                    args=(connection_key, connection)
-                )
-                thread.daemon = True
-                thread.start()
-            else:
-                print(f"Skipping read thread for {connection_key} - connection failed")
+
+            # Проверяем готовность MQTT соединения
+            if isinstance(connection, MQTTConnection):
+                if not connection.connected.is_set():
+                    print(f"MQTT connection {connection_key} not ready, retrying connect...")
+                    if not connection.connect():
+                        print(f"Could not establish MQTT connection for {connection_key}")
+                        continue
+                print(f"MQTT connection {connection_key} ready")
+
+            thread = threading.Thread(
+                target=self.read_messages,
+                args=(connection_key, connection)
+            )
+            thread.daemon = True
+            thread.start()
+            print(f"Started read thread for {connection_key}")
 
     def start_communication_threads(self):
         for conn_key, connection in self.connections.items():
@@ -159,27 +165,36 @@ class LabPneumoLogic:
 
     def read_messages(self, connection_key, connection):
         consecutive_errors = 0
+        print(f"Starting read_messages thread for {connection_key}")
+        
+        # Для MQTT соединений проверяем что подключение установлено
+        if isinstance(connection, MQTTConnection):
+            if not connection.connected.is_set():
+                print(f"Waiting for MQTT connection {connection_key}...")
+                connection.connected.wait(timeout=5.0)
+                if not connection.connected.is_set():
+                    print(f"Failed to establish MQTT connection for {connection_key}")
+                    return
+        
         while not self.stop_event.is_set():
             try:
-                if consecutive_errors > 5:  # Если много ошибок подряд
-                    print(f"Too many errors for {connection_key}, reconnecting...")
-                    if connection.connect():  # Пробуем переподключиться
-                        consecutive_errors = 0
-                    else:
-                        time.sleep(1)
-                        continue
-
                 message = connection.read_message()
                 if message:
+                    print(f"Got message in read_messages: {connection_key} -> {message}")
                     self.message_queue.put((connection_key, message))
                     consecutive_errors = 0
                 else:
-                    time.sleep(0.01)  # Небольшая пауза если нет сообщений
+                    time.sleep(0.01)
 
             except Exception as e:
-                print(f"Error reading from {connection_key}: {str(e)}")
+                print(f"Error in read_messages for {connection_key}: {str(e)}")
                 consecutive_errors += 1
-                time.sleep(0.1)
+                if consecutive_errors > 5:
+                    print(f"Attempting reconnect for {connection_key}")
+                    if isinstance(connection, MQTTConnection):
+                        if connection.connect():
+                            consecutive_errors = 0
+                    time.sleep(1)
 
     def serial_read_thread(self, port):
         connection = self.serial_connections[port]
@@ -328,25 +343,42 @@ class LabPneumoLogic:
                 continue
 
     def initialize_all_connections(self):
-        """Инициализация всех подключений в отдельном потоке"""
-        # Собираем все уникальные конфигурации подключений
+        """Инициализация всех подключений"""
+        print("Starting initialize_all_connections...")
         connection_configs = {}
         
-        # Из сенсоров
+        # Собираем все конфигурации
         for sensor in self.sensors.values():
             key = make_connection_key(sensor.connection)
             if key not in connection_configs:
                 connection_configs[key] = sensor.connection
 
-        # Из клапанов
         for valve in self.valves.values():
             key = make_connection_key(valve.connection)
             if key not in connection_configs:
                 connection_configs[key] = valve.connection
 
-        # Инициализируем все подключения
+        # Сначала инициализируем MQTT соединения
         for key, config in connection_configs.items():
-            if key not in self.connections:
+            if config.get('type') == 'mqtt':
+                print(f"Initializing MQTT connection for {key}...")
+                connection = create_connection(config)
+                if connection:
+                    for attempt in range(3):
+                        if connection.connect():
+                            print(f"MQTT connection successful for {key}")
+                            self.connections[key] = connection
+                            break
+                        print(f"MQTT connection attempt {attempt + 1} failed")
+                        time.sleep(1)
+                    else:
+                        print(f"Failed to connect MQTT for {key}")
+                        self.connections[key] = None
+
+        # Затем инициализируем остальные соединения
+        for key, config in connection_configs.items():
+            if config.get('type') != 'mqtt' and key not in self.connections:
+                print(f"Initializing connection for {key}...")
                 connection = create_connection(config)
                 if connection and connection.connect():
                     self.connections[key] = connection
@@ -354,6 +386,8 @@ class LabPneumoLogic:
                 else:
                     print(f"Failed to connect to {key}")
                     self.connections[key] = None
+
+        print("Finished initialize_all_connections")
 
     def on_closing(self):
         self.stop_event.set()
