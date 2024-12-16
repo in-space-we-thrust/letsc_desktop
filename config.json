@@ -101,8 +101,20 @@
             "default_status": false
         },
         {
-            "id": 4,
+            "id": 2,
             "name": "V_2",
+            "pin": 23,
+            "connection": {
+                "type": "serial",
+                "port": "COM6"
+            },
+            "coord_x": 750,
+            "coord_y": 100,
+            "default_status": true
+        },
+        {
+            "id": 3,
+            "name": "V_3",
             "pin": 23,
             "connection": {
                 "type": "serial",
@@ -110,6 +122,19 @@
                 "baudrate": 115200
             },
             "coord_x": 200,
+            "coord_y": 550,
+            "default_status": false
+        },
+        {
+            "id": 4,
+            "name": "V_4",
+            "pin": 23,
+            "connection": {
+                "type": "serial",
+                "port": "COM8",
+                "baudrate": 115200
+            },
+            "coord_x": 750,
             "coord_y": 550,
             "default_status": true
         }
