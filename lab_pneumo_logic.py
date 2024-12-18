@@ -233,24 +233,33 @@ class LabPneumoLogic:
             while not self.message_queue.empty():
                 try:
                     connection_key, message = self.message_queue.get_nowait()
-                    self.logger.debug(f"Processing message from {connection_key}, type: {type(message)}") 
+                    self.logger.debug(f"Processing message from {connection_key}, type: {type(message)}")
                     self.logger.debug(f"Message content: {message}")
 
-                    # Проверяем тип соединения через connections
                     connection = self.connections.get(connection_key)
                     if isinstance(connection, MQTTConnection):
                         self.logger.debug("Processing MQTT message...")
                         try:
-                            topic, payload = message  # Распаковываем кортеж (topic, message)
-                            # Для MQTT сообщение уже содержит JSON, поэтому парсим его напрямую
+                            topic, payload = message
                             parsed_message = json.loads(payload)
-                            if parsed_message and parsed_message.get('sensor_id'):
+                            
+                            # Проверяем, это ответ от сенсора или от клапана
+                            if parsed_message.get('sensor_id'):
                                 sensor_id = parsed_message['sensor_id']
                                 value = parsed_message['value']
-                                self.logger.debug(f"MQTT parsed: sensor_id={sensor_id}, value={value}")
+                                self.logger.debug(f"MQTT sensor data: sensor_id={sensor_id}, value={value}")
                                 self.sensor_data_queue.put({sensor_id: value})
+                            elif parsed_message.get('valve_id'):
+                                # Обработка статуса клапана
+                                valve_id = parsed_message['valve_id']
+                                valve = self.valves.get(valve_id)
+                                if valve:
+                                    valve.status = parsed_message.get('state', valve.status)
+                                    self.logger.debug(f"MQTT valve status update: valve_id={valve_id}, state={valve.status}")
+                                    self.drawing.toggle_valve(valve)
                             else:
-                                self.logger.warning(f"Invalid MQTT message format: {payload}")
+                                self.logger.warning(f"Unknown MQTT message format: {payload}")
+                                
                         except json.JSONDecodeError as e:
                             self.logger.error(f"JSON parsing error: {e}, payload: {payload}")
                         except Exception as e:
@@ -303,7 +312,7 @@ class LabPneumoLogic:
         filename = f"sensor_data_{timestamp}.csv"
         self.csv_file = open(filename, 'w', newline='')
         
-        # Созда��м заголовки для CSV файла
+        # Создаём заголовки для CSV файла
         headers = ['Timestamp', 'Relative_Time']
         for sensor in self.sensors.values():
             headers.append(f"{sensor.name} ({sensor.units})")
@@ -328,26 +337,48 @@ class LabPneumoLogic:
         connection_key = make_connection_key(valve.connection)
         connection = self.connections.get(connection_key)
         
-        if not connection or not hasattr(connection, 'is_connected') or not connection.is_connected():
+        if not connection:
             self.logger.error(f"No connection object for valve {valve.id}")
             self.drawing.update_valve_error(valve)
             return False
         
-        # Prepare command
-        command = {
-            "type": 1,
-            "command": 17,
-            "valve_pin": valve.pin,
-            "result": 0
-        }
-        
-        # Toggle valve state immediately in GUI
-        valve.toggle()
-        self.drawing.toggle_valve(valve)
-        
-        # Put command in queue for async processing
-        self.command_queue.put((valve, connection, command))
-        return True
+        try:
+            if isinstance(connection, MQTTConnection):
+                if not connection.connected.is_set():
+                    if not connection.connect():
+                        self.logger.error(f"Failed to reconnect MQTT for valve {valve.id}")
+                        self.drawing.update_valve_error(valve)
+                        return False
+                    
+                command = {
+                    "valve_id": valve.id,
+                    "command": "toggle",
+                    "pin": valve.pin,
+                    "state": not valve.status
+                }
+                # Используем топик команд из конфигурации
+                connection.topic = valve.connection.get('topic', connection.topic)
+            else:
+                command = {
+                    "valve_id": valve.id,
+                    "type": 1,
+                    "command": 17,
+                    "valve_pin": valve.pin,
+                    "result": 0
+                }
+
+            # Toggle valve state immediately in GUI
+            valve.toggle()
+            self.drawing.toggle_valve(valve)
+            
+            # Put command in queue for async processing
+            self.command_queue.put((valve, connection, command))
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error toggling valve {valve.id}: {e}")
+            self.drawing.update_valve_error(valve)
+            return False
 
     def process_commands(self):
         """Обработка команд в отдельном потоке"""
@@ -357,11 +388,17 @@ class LabPneumoLogic:
                 if command_data:
                     valve, connection, command = command_data
                     try:
-                        if connection.send_message(json.dumps(command)):
-                            # Используем after для обновления GUI в основном потоке
-                            self.drawing.root.after(0, self.drawing.toggle_valve, valve)
+                        message = json.dumps(command)
+                        if isinstance(connection, MQTTConnection):
+                            success = connection.send_message(message)
+                            if not success:
+                                self.logger.error(f"Failed to send MQTT command for valve {valve.id}")
+                                self.drawing.root.after(0, self.drawing.update_valve_error, valve)
                         else:
-                            self.drawing.root.after(0, self.drawing.update_valve_error, valve)
+                            success = connection.send_message(message)
+                            if not success:
+                                self.logger.error(f"Failed to send serial command for valve {valve.id}")
+                                self.drawing.root.after(0, self.drawing.update_valve_error, valve)
                     except Exception as e:
                         self.logger.error(f"Command processing error: {e}")
                         self.drawing.root.after(0, self.drawing.update_valve_error, valve)
