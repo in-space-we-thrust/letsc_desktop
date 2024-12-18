@@ -130,9 +130,11 @@
             "name": "V_4",
             "pin": 23,
             "connection": {
-                "type": "serial",
-                "port": "COM8",
-                "baudrate": 115200
+                "type": "mqtt",
+                "broker": "localhost",
+                "port": 1883,
+                "topic": "commutator/valves/4/command",
+                "status_topic": "commutator/valves/4/status"
             },
             "coord_x": 600,
             "coord_y": 550,

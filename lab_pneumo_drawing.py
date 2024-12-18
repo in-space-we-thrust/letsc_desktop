@@ -6,6 +6,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from abc import ABC, abstractmethod
+from logger_config import setup_logger
 
 GRAPH_TIME_WINDOW = 30  # seconds
 GRAPH_UPDATE_INTERVAL = 200  # ms
@@ -31,6 +32,7 @@ class DrawingStrategy(ABC):
 
 class TkinterDrawing(DrawingStrategy):
     def __init__(self, geometry, title):
+        self.logger = setup_logger("TkinterDrawing")
         self.root = tk.Tk()
         self.root.geometry(geometry)
         self.canvas_width, self.canvas_height = [int(digit) for digit in geometry.split('x')]
@@ -218,15 +220,15 @@ class TkinterDrawing(DrawingStrategy):
         self.canvas.itemconfig(valve.label, text=new_text, fill=new_color)
 
     def show_graph_window(self, sensor):
-        print(f"Opening graph window for sensor {sensor.name}...")
+        self.logger.info(f"Opening graph window for sensor {sensor.name}")
         
-        # Проверяем существование окна и его валидность
         if sensor.id in self.graph_windows:
             try:
-                self.graph_windows[sensor.id]['window'].state()  # Проверяем, существует ли окно
+                self.graph_windows[sensor.id]['window'].state()
                 self.graph_windows[sensor.id]['window'].lift()
                 return
-            except tk.TclError:  # Если окно было закрыто некорректно
+            except tk.TclError:
+                self.logger.debug("Old window was destroyed, creating new one")
                 del self.graph_windows[sensor.id]
                 if sensor.id in self.animation_running:
                     del self.animation_running[sensor.id]

@@ -7,6 +7,7 @@ import csv
 from datetime import datetime
 from communication import create_connection, SerialConnection, MQTTConnection  # Add MQTTConnection
 from devices import Sensor, Valve
+from logger_config import setup_logger
 
 def make_connection_key(connection_config):
     """Create a unique key for a connection configuration"""
@@ -19,6 +20,7 @@ def make_connection_key(connection_config):
 
 class LabPneumoLogic:
     def __init__(self, drawing):
+        self.logger = setup_logger("LabPneumoLogic")
         self.drawing = drawing
         self.sensors = {}
         self.valves = {}
@@ -69,15 +71,15 @@ class LabPneumoLogic:
             if sensor_data['connection']['type'] == 'mqtt':
                 topic = sensor_data['connection']['topic']
                 self.mqtt_topics[topic] = sensor_data['id']
-                print(f"Registered MQTT topic {topic} for sensor {sensor_data['id']}")
+                self.logger.info(f"Registered MQTT topic {topic} for sensor {sensor_data['id']}")
 
             if connection_key not in self.connections:
                 connection = create_connection(sensor_data['connection'])
                 if connection:  # Remove the connect() check here - let it happen asynchronously
                     self.connections[connection_key] = connection
-                    print(f"Created connection for {connection_key}")
+                    self.logger.info(f"Created connection for {connection_key}")
                 else:
-                    print(f"Warning: Could not create connection object for {connection_key}")
+                    self.logger.warning(f"Could not create connection object for {connection_key}")
                     self.connections[connection_key] = None
 
             sensor = Sensor.from_json(sensor_data)
@@ -85,15 +87,30 @@ class LabPneumoLogic:
 
     def load_valves(self, valves_data):
         for valve_data in valves_data:
-            # То же самое для клапанов
             connection_key = make_connection_key(valve_data['connection'])
             if connection_key not in self.connections:
                 connection = create_connection(valve_data['connection'])
-                if connection and connection.connect():
-                    self.connections[connection_key] = connection
-                else:
-                    print(f"Warning: Could not connect using config {valve_data['connection']}")
-                    self.connections[connection_key] = None
+                if connection:
+                    # Для MQTT клапанов нужна особая обработка
+                    if valve_data['connection']['type'] == 'mqtt':
+                        self.logger.info(f"Initializing MQTT valve connection for {connection_key}...")
+                        if connection.connect():
+                            # Подписываемся на топик статуса клапана если он указан
+                            if 'status_topic' in valve_data['connection']:
+                                status_topic = valve_data['connection']['status_topic']
+                                connection.client.subscribe(status_topic)
+                                self.logger.info(f"Subscribed to valve status topic: {status_topic}")
+                            self.connections[connection_key] = connection
+                        else:
+                            self.logger.error(f"Could not connect MQTT for valve: {valve_data['name']}")
+                            self.connections[connection_key] = None
+                    else:
+                        # Для остальных типов подключений
+                        if connection.connect():
+                            self.connections[connection_key] = connection
+                        else:
+                            self.logger.warning(f"Could not connect using config {valve_data['connection']}")
+                            self.connections[connection_key] = None
 
             valve = Valve.from_json(valve_data)
             self.valves[valve.id] = valve
@@ -116,7 +133,7 @@ class LabPneumoLogic:
                 self.connections[connection_key] = connection
                 return True
             else:
-                print(f"Warning: Could not connect to {connection_config}")
+                self.logger.warning(f"Could not connect to {connection_config}")
                 self.connections[connection_key] = None
         return connection_key in self.connections
 
@@ -124,27 +141,27 @@ class LabPneumoLogic:
         if port not in self.serial_connections:
             connection = connect_to_serial_port(port, 115200)
             if connection is None:
-                print(f"Warning: Could not connect to port {port}")
+                self.logger.warning(f"Could not connect to port {port}")
             self.serial_connections[port] = connection
 
     def initialize_ui(self):
         self.drawing.initialize_ui(self.sensors, self.valves, self.lines, self.toggle_valve)
 
     def start_serial_threads(self):
-        print("Starting communication threads...")
+        self.logger.info("Starting communication threads...")
         for connection_key, connection in self.connections.items():
             if connection is None:
-                print(f"Skipping thread for {connection_key} - no connection object")
+                self.logger.warning(f"Skipping thread for {connection_key} - no connection object")
                 continue
 
             # Проверяем готовность MQTT соединения
             if isinstance(connection, MQTTConnection):
                 if not connection.connected.is_set():
-                    print(f"MQTT connection {connection_key} not ready, retrying connect...")
+                    self.logger.warning(f"MQTT connection {connection_key} not ready, retrying connect...")
                     if not connection.connect():
-                        print(f"Could not establish MQTT connection for {connection_key}")
+                        self.logger.error(f"Could not establish MQTT connection for {connection_key}")
                         continue
-                print(f"MQTT connection {connection_key} ready")
+                self.logger.info(f"MQTT connection {connection_key} ready")
 
             thread = threading.Thread(
                 target=self.read_messages,
@@ -152,7 +169,7 @@ class LabPneumoLogic:
             )
             thread.daemon = True
             thread.start()
-            print(f"Started read thread for {connection_key}")
+            self.logger.info(f"Started read thread for {connection_key}")
 
     def start_communication_threads(self):
         for conn_key, connection in self.connections.items():
@@ -165,32 +182,32 @@ class LabPneumoLogic:
 
     def read_messages(self, connection_key, connection):
         consecutive_errors = 0
-        print(f"Starting read_messages thread for {connection_key}")
+        self.logger.info(f"Starting read_messages thread for {connection_key}")
         
         # Для MQTT соединений проверяем что подключение установлено
         if isinstance(connection, MQTTConnection):
             if not connection.connected.is_set():
-                print(f"Waiting for MQTT connection {connection_key}...")
+                self.logger.info(f"Waiting for MQTT connection {connection_key}...")
                 connection.connected.wait(timeout=5.0)
                 if not connection.connected.is_set():
-                    print(f"Failed to establish MQTT connection for {connection_key}")
+                    self.logger.error(f"Failed to establish MQTT connection for {connection_key}")
                     return
         
         while not self.stop_event.is_set():
             try:
                 message = connection.read_message()
                 if message:
-                    print(f"Got message in read_messages: {connection_key} -> {message}")
+                    self.logger.debug(f"Got message in read_messages: {connection_key} -> {message}")
                     self.message_queue.put((connection_key, message))
                     consecutive_errors = 0
                 else:
                     time.sleep(0.01)
 
             except Exception as e:
-                print(f"Error in read_messages for {connection_key}: {str(e)}")
+                self.logger.error(f"Error in read_messages for {connection_key}: {str(e)}")
                 consecutive_errors += 1
                 if consecutive_errors > 5:
-                    print(f"Attempting reconnect for {connection_key}")
+                    self.logger.warning(f"Attempting reconnect for {connection_key}")
                     if isinstance(connection, MQTTConnection):
                         if connection.connect():
                             consecutive_errors = 0
@@ -199,7 +216,7 @@ class LabPneumoLogic:
     def serial_read_thread(self, port):
         connection = self.serial_connections[port]
         if connection is None:  # Skip if connection is not available
-            print(f"Warning: No connection available for port {port}")
+            self.logger.warning(f"No connection available for port {port}")
             return
         
         while not self.stop_event.is_set():
@@ -208,7 +225,7 @@ class LabPneumoLogic:
                 if received_message:
                     self.serial_queue.put((port, received_message))
             except Exception as e:
-                print(f"Error reading from {port}: {str(e)}")
+                self.logger.error(f"Error reading from {port}: {str(e)}")
                 time.sleep(1)  # Add delay to avoid rapid error messages
 
     def process_serial_data(self):
@@ -216,19 +233,28 @@ class LabPneumoLogic:
             while not self.message_queue.empty():
                 try:
                     connection_key, message = self.message_queue.get_nowait()
-                    
-                    # Проверяем, является ли connection_key MQTT топиком
-                    if 'mqtt' in str(connection_key).lower():  # Изменено условие проверки
-                        # Ищем сенсор по топику
-                        for sensor in self.sensors.values():
-                            if (sensor.connection['type'] == 'mqtt' and 
-                                sensor.connection['topic'] == message[0]):  # Распаковываем кортеж (topic, message)
-                                try:
-                                    value = float(message[1])  # Берем значение из кортежа
-                                    self.sensor_data_queue.put({sensor.id: value})
-                                    print(f"MQTT data received for sensor {sensor.id}: {value}")
-                                except ValueError:
-                                    print(f"Invalid MQTT message format: {message}")
+                    self.logger.debug(f"Processing message from {connection_key}, type: {type(message)}") 
+                    self.logger.debug(f"Message content: {message}")
+
+                    # Проверяем тип соединения через connections
+                    connection = self.connections.get(connection_key)
+                    if isinstance(connection, MQTTConnection):
+                        self.logger.debug("Processing MQTT message...")
+                        try:
+                            topic, payload = message  # Распаковываем кортеж (topic, message)
+                            # Для MQTT сообщение уже содержит JSON, поэтому парсим его напрямую
+                            parsed_message = json.loads(payload)
+                            if parsed_message and parsed_message.get('sensor_id'):
+                                sensor_id = parsed_message['sensor_id']
+                                value = parsed_message['value']
+                                self.logger.debug(f"MQTT parsed: sensor_id={sensor_id}, value={value}")
+                                self.sensor_data_queue.put({sensor_id: value})
+                            else:
+                                self.logger.warning(f"Invalid MQTT message format: {payload}")
+                        except json.JSONDecodeError as e:
+                            self.logger.error(f"JSON parsing error: {e}, payload: {payload}")
+                        except Exception as e:
+                            self.logger.error(f"Error processing MQTT message: {e}")
                         continue
 
                     # Обработка обычных JSON сообщений
@@ -239,14 +265,14 @@ class LabPneumoLogic:
                             value = parsed_message['value']
                             self.sensor_data_queue.put({sensor_id: value})
                         else:
-                            print(f"Received command from {connection_key}: {message}")
+                            self.logger.info(f"Received command from {connection_key}: {message}")
                     except json.JSONDecodeError:
-                        print(f"Invalid JSON message from {connection_key}: {message}")
+                        self.logger.warning(f"Invalid JSON message from {connection_key}: {message}")
                     
                 except Exception as e:
-                    print(f"Error processing message: {e}, key: {connection_key}, message: {message}")
+                    self.logger.error(f"Error processing message: {e}, key: {connection_key}, message: {message}")
         except Exception as e:
-            print(f"Error in process_serial_data: {e}")
+            self.logger.error(f"Error in process_serial_data: {e}")
         finally:
             self.drawing.root.after(100, self.process_serial_data)
 
@@ -277,7 +303,7 @@ class LabPneumoLogic:
         filename = f"sensor_data_{timestamp}.csv"
         self.csv_file = open(filename, 'w', newline='')
         
-        # Создаем заголовки для CSV файла
+        # Созда��м заголовки для CSV файла
         headers = ['Timestamp', 'Relative_Time']
         for sensor in self.sensors.values():
             headers.append(f"{sensor.name} ({sensor.units})")
@@ -303,7 +329,7 @@ class LabPneumoLogic:
         connection = self.connections.get(connection_key)
         
         if not connection or not hasattr(connection, 'is_connected') or not connection.is_connected():
-            print(f"Warning: No connection object for valve {valve.id}")
+            self.logger.error(f"No connection object for valve {valve.id}")
             self.drawing.update_valve_error(valve)
             return False
         
@@ -337,14 +363,13 @@ class LabPneumoLogic:
                         else:
                             self.drawing.root.after(0, self.drawing.update_valve_error, valve)
                     except Exception as e:
-                        print(f"Command processing error: {e}")
+                        self.logger.error(f"Command processing error: {e}")
                         self.drawing.root.after(0, self.drawing.update_valve_error, valve)
             except queue.Empty:
                 continue
 
     def initialize_all_connections(self):
-        """Инициализация всех подключений"""
-        print("Starting initialize_all_connections...")
+        self.logger.info("Starting initialize_all_connections...")
         connection_configs = {}
         
         # Собираем все конфигурации
@@ -361,33 +386,33 @@ class LabPneumoLogic:
         # Сначала инициализируем MQTT соединения
         for key, config in connection_configs.items():
             if config.get('type') == 'mqtt':
-                print(f"Initializing MQTT connection for {key}...")
+                self.logger.info(f"Initializing MQTT connection for {key}...")
                 connection = create_connection(config)
                 if connection:
                     for attempt in range(3):
                         if connection.connect():
-                            print(f"MQTT connection successful for {key}")
+                            self.logger.info(f"MQTT connection successful for {key}")
                             self.connections[key] = connection
                             break
-                        print(f"MQTT connection attempt {attempt + 1} failed")
+                        self.logger.warning(f"MQTT connection attempt {attempt + 1} failed")
                         time.sleep(1)
                     else:
-                        print(f"Failed to connect MQTT for {key}")
+                        self.logger.error(f"Failed to connect MQTT for {key}")
                         self.connections[key] = None
 
         # Затем инициализируем остальные соединения
         for key, config in connection_configs.items():
             if config.get('type') != 'mqtt' and key not in self.connections:
-                print(f"Initializing connection for {key}...")
+                self.logger.info(f"Initializing connection for {key}...")
                 connection = create_connection(config)
                 if connection and connection.connect():
                     self.connections[key] = connection
-                    print(f"Successfully connected to {key}")
+                    self.logger.info(f"Successfully connected to {key}")
                 else:
-                    print(f"Failed to connect to {key}")
+                    self.logger.error(f"Failed to connect to {key}")
                     self.connections[key] = None
 
-        print("Finished initialize_all_connections")
+        self.logger.info("Finished initialize_all_connections")
 
     def on_closing(self):
         self.stop_event.set()

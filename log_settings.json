@@ -1,0 +1,13 @@
+
+{
+    "default_level": "INFO",
+    "loggers": {
+        "LabPneumoLogic": "INFO",
+        "TkinterDrawing": "INFO",
+        "Serial_COM6": "INFO",
+        "MQTT_localhost_1883": "INFO"
+    },
+    "log_to_file": true,
+    "log_to_console": true,
+    "log_directory": "logs"
+}
